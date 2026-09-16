@@ -1,4 +1,4 @@
-import type { AuthSession, DemoMeta, EventPageData, EventSnapshot, InteractionRecord } from '../types.ts'
+import type { AnonymousAttendeeProfile, AuthSession, DemoMeta, EventPageData, EventSnapshot, InteractionRecord } from '../types.ts'
 import type { ImportedInteraction } from './interactionImport.ts'
 
 type FetchOptions = RequestInit & {
@@ -72,4 +72,6 @@ export const api = {
   getPresenterEvent: (code: string) => request<EventSnapshot>(`/api/events/code/${code}/presenter`),
   submitResponse: (code: string, payload: Record<string, unknown>) =>
     request<{ responseId: string; message: string }>(`/api/events/code/${code}/responses`, { method: 'POST', json: payload }),
+  voteIdea: (code: string, responseId: string, payload: { direction: 'up' | 'down'; attendee: AnonymousAttendeeProfile }) =>
+    request<{ ok: boolean }>(`/api/events/code/${code}/responses/${responseId}/vote`, { method: 'POST', json: payload }),
 }

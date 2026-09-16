@@ -57,6 +57,15 @@ export type ResponseRecord = {
   createdAt: string
 }
 
+export type ResponseVoteRecord = {
+  id: string
+  eventId: string
+  responseId: string
+  voterKey: string
+  direction: 'up' | 'down'
+  createdAt: string
+}
+
 export type AnalysisRecord = {
   id: string
   responseId: string
@@ -158,6 +167,17 @@ function rowToResponse(row: RawRow): ResponseRecord {
   }
 }
 
+function rowToResponseVote(row: RawRow): ResponseVoteRecord {
+  return {
+    id: String(row.id),
+    eventId: String(row.event_id),
+    responseId: String(row.response_id),
+    voterKey: String(row.voter_key),
+    direction: String(row.direction) === 'down' ? 'down' : 'up',
+    createdAt: String(row.created_at),
+  }
+}
+
 function rowToAnalysis(row: RawRow): AnalysisRecord {
   return {
     id: String(row.id),
@@ -239,6 +259,18 @@ export function initializeDatabase() {
       created_at TEXT NOT NULL,
       FOREIGN KEY (response_id) REFERENCES responses (id) ON DELETE CASCADE,
       FOREIGN KEY (event_id) REFERENCES events (id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS response_votes (
+      id TEXT PRIMARY KEY,
+      event_id TEXT NOT NULL,
+      response_id TEXT NOT NULL,
+      voter_key TEXT NOT NULL,
+      direction TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (event_id) REFERENCES events (id) ON DELETE CASCADE,
+      FOREIGN KEY (response_id) REFERENCES responses (id) ON DELETE CASCADE,
+      UNIQUE(response_id, voter_key)
     );
   `)
 
@@ -410,8 +442,9 @@ export function createEvent(input: {
     description: (input.description ?? '').trim(),
     status: input.status ?? 'active',
     config: {
-      attendeePrompt: 'Join anonymously and keep the room moving.',
+      attendeePrompt: 'Join the AI townhall, choose an anonymous nickname, and help shape the next move.',
       showCounters: true,
+      teams: ['Catalysts', 'Builders', 'Navigators', 'Trailblazers'],
     },
     isDemo: Boolean(input.isDemo),
     createdAt: timestamp,
@@ -574,6 +607,13 @@ export function listResponses(eventId: string) {
   return rows.map(rowToResponse)
 }
 
+export function listResponseVotes(eventId: string) {
+  const rows = db
+    .prepare('SELECT * FROM response_votes WHERE event_id = ? ORDER BY created_at DESC')
+    .all(eventId) as RawRow[]
+  return rows.map(rowToResponseVote)
+}
+
 export function getResponse(id: string) {
   const row = db.prepare('SELECT * FROM responses WHERE id = ?').get(id) as RawRow | undefined
   return row ? rowToResponse(row) : null
@@ -641,6 +681,64 @@ export function updateResponseModeration(id: string, moderationState: Moderation
   })
 
   return updated
+}
+
+export function upsertResponseVote(input: {
+  eventId: string
+  responseId: string
+  voterKey: string
+  direction: 'up' | 'down'
+}) {
+  const existing = db
+    .prepare('SELECT * FROM response_votes WHERE response_id = ? AND voter_key = ?')
+    .get(input.responseId, input.voterKey) as RawRow | undefined
+
+  if (existing) {
+    const updated = {
+      ...rowToResponseVote(existing),
+      direction: input.direction,
+      createdAt: now(),
+    } satisfies ResponseVoteRecord
+
+    db.prepare(
+      `
+        UPDATE response_votes
+        SET direction = @direction, created_at = @created_at
+        WHERE id = @id
+      `,
+    ).run({
+      id: updated.id,
+      direction: updated.direction,
+      created_at: updated.createdAt,
+    })
+
+    return updated
+  }
+
+  const vote: ResponseVoteRecord = {
+    id: randomUUID(),
+    eventId: input.eventId,
+    responseId: input.responseId,
+    voterKey: input.voterKey,
+    direction: input.direction,
+    createdAt: now(),
+  }
+
+  db.prepare(
+    `
+      INSERT INTO response_votes (id, event_id, response_id, voter_key, direction, created_at)
+      VALUES (@id, @event_id, @response_id, @voter_key, @direction, @created_at)
+    `,
+  ).run({
+    id: vote.id,
+    event_id: vote.eventId,
+    response_id: vote.responseId,
+    voter_key: vote.voterKey,
+    direction: vote.direction,
+    created_at: vote.createdAt,
+  })
+
+  return vote
 }
 
 export function createOrReplaceAnalysis(input: Omit<AnalysisRecord, 'id' | 'createdAt'>) {

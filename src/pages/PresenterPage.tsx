@@ -20,7 +20,7 @@ import { convexPublicSyncEnabled, convexQueries } from '../lib/convex.ts'
 import { socketUrl } from '../lib/realtime.ts'
 import type { EventSnapshot } from '../types.ts'
 
-const views = ['questions', 'word-cloud', 'sentiment', 'polls', 'ratings', 'engagement', 'insights'] as const
+const views = ['questions', 'ideas', 'leaderboard', 'word-cloud', 'sentiment', 'polls', 'ratings', 'engagement', 'insights'] as const
 type PresenterView = (typeof views)[number]
 const presenterMilestones = [10, 25, 50, 100, 200]
 
@@ -156,7 +156,7 @@ export function PresenterPage() {
           <span>Crowd momentum</span>
           <strong>{momentum.label}</strong>
           <p>
-            {liveSnapshot.metrics.totalResponses} responses and {liveSnapshot.metrics.reactionCount} reactions are driving the room.
+            {liveSnapshot.metrics.totalResponses} responses, {liveSnapshot.metrics.reactionCount} reactions, and {liveSnapshot.metrics.uniqueParticipants} anonymous participants are driving the room.
           </p>
         </article>
         <article className="presenter-card presenter-card--gamified">
@@ -199,6 +199,42 @@ export function PresenterPage() {
             {liveSnapshot.presenterQuestions.length === 0 ? (
               <div className="presenter-center">Approved audience questions will appear here.</div>
             ) : null}
+          </div>
+        ) : null}
+
+        {view === 'ideas' ? (
+          <div className="presenter-question-grid">
+            {liveSnapshot.ideaFeed.slice(0, 6).map((idea) => (
+              <article key={idea.id} className="presenter-card presenter-card--gamified">
+                <span>
+                  {idea.team} • {idea.nickname}
+                </span>
+                <strong>{idea.text}</strong>
+                <p>
+                  Score {idea.votes.score} • {idea.sentiment}
+                </p>
+              </article>
+            ))}
+            {liveSnapshot.ideaFeed.length === 0 ? (
+              <div className="presenter-center">Ideas and opportunities will appear here as attendees share them.</div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {view === 'leaderboard' ? (
+          <div className="presenter-metric-grid">
+            {liveSnapshot.teamLeaderboard.map((entry, index) => (
+              <article key={entry.team} className="presenter-card presenter-card--gamified">
+                <span>#{index + 1}</span>
+                <strong>{entry.team}</strong>
+                <p>
+                  {entry.points} pts • {entry.contributors} contributors
+                </p>
+                <p>
+                  {entry.contributions} actions • {entry.votesReceived} upvotes earned
+                </p>
+              </article>
+            ))}
           </div>
         ) : null}
 

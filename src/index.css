@@ -1004,6 +1004,62 @@ h3 {
     grid-template-columns: 1fr;
   }
 
+
+.townhall-setup {
+  display: grid;
+  gap: 1rem;
+}
+
+.townhall-setup__grid,
+.townhall-actions,
+.townhall-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.townhall-setup__grid,
+.townhall-actions {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.townhall-grid {
+  grid-template-columns: minmax(0, 1.6fr) minmax(320px, 0.9fr);
+  align-items: start;
+}
+
+.townhall-grid__main,
+.townhall-grid__side,
+.idea-feed,
+.leaderboard-list {
+  display: grid;
+  gap: 1rem;
+}
+
+.townhall-card,
+.idea-card,
+.leaderboard-row {
+  padding: 1rem;
+  border-radius: 20px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  background: rgba(9, 14, 28, 0.76);
+}
+
+.vote-row,
+.leaderboard-row {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+  align-items: center;
+}
+
+@media (max-width: 1100px) {
+  .townhall-setup__grid,
+  .townhall-actions,
+  .townhall-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
   .prompt-dots {
     justify-content: flex-start;
   }

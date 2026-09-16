@@ -32,8 +32,10 @@ import {
   listEventsForOrganizer,
   listInteractions,
   listResponses,
+  listResponseVotes,
   type InteractionType,
   type OrganizerRecord,
+  upsertResponseVote,
   updateEvent,
   updateInteraction,
   updateResponseModeration,
@@ -105,6 +107,38 @@ const registerSchema = z.object({
   email: z.email(),
   password: z.string().min(8).max(128),
 })
+
+const attendeeProfileSchema = z.object({
+  attendeeKey: z.string().trim().min(8).max(120),
+  nickname: z.string().trim().min(2).max(24),
+  team: z.string().trim().min(2).max(40),
+})
+
+function normalizeProfile(input: z.infer<typeof attendeeProfileSchema>) {
+  return {
+    attendeeKey: input.attendeeKey.trim(),
+    nickname: input.nickname.trim(),
+    team: input.team.trim(),
+  }
+}
+
+function getConfiguredTeams(event: { config: Record<string, unknown> }) {
+  const rawTeams = Array.isArray(event.config.teams) ? event.config.teams : []
+  const teams = rawTeams.map(String).map((team) => team.trim()).filter(Boolean)
+  return teams.length > 0 ? teams : ['Catalysts', 'Builders', 'Navigators', 'Trailblazers']
+}
+
+function getAttendeeMeta(content: Record<string, unknown>) {
+  const attendeeKey = typeof content.attendeeKey === 'string' ? content.attendeeKey : ''
+  const nickname = typeof content.nickname === 'string' ? content.nickname : 'Anonymous'
+  const team = typeof content.team === 'string' ? content.team : 'Unassigned'
+
+  return {
+    attendeeKey,
+    nickname,
+    team,
+  }
+}
 
 function bootstrapOrganizer() {
   const email = config.bootstrapOrganizerEmail
@@ -214,13 +248,13 @@ function createDefaultInteractions(eventId: string) {
     createInteraction({
       eventId,
       type: 'question',
-      prompt: 'What question would you like the speaker to answer?',
+      prompt: 'What question should leadership answer live?',
       ordering: 1,
     }),
     createInteraction({
       eventId,
       type: 'feedback',
-      prompt: 'What did you think about this session?',
+      prompt: 'Share one idea, fear, or opportunity the room should discuss.',
       ordering: 2,
     }),
     createInteraction({
@@ -233,8 +267,8 @@ function createDefaultInteractions(eventId: string) {
     createInteraction({
       eventId,
       type: 'poll',
-      prompt: 'Which topic should we cover next?',
-      options: ['Implementation', 'Pricing', 'Adoption', 'Q&A'],
+      prompt: 'What should we do next with AI across the business?',
+      options: ['Pilot one workflow', 'Train managers', 'Improve governance', 'Pause and reassess'],
       settings: { allowMultiple: false },
       ordering: 4,
     }),
@@ -268,7 +302,11 @@ function buildEventSnapshot(eventId: string, includeHidden: boolean) {
   const interactions = listInteractions(eventId)
   const responses = listResponses(eventId)
   const analyses = listAnalyses(eventId)
+  const votes = listResponseVotes(eventId)
   const interactionById = new Map(interactions.map((interaction) => [interaction.id, interaction]))
+  const analysisByResponseId = new Map(analyses.map((analysis) => [analysis.responseId, analysis]))
+  const voteSummaryByResponseId = new Map<string, { up: number; down: number; score: number }>()
+  const teams = getConfiguredTeams(event)
 
   const usableResponses = responses.filter((response) => response.moderationState !== 'deleted')
   const publicResponses = usableResponses.filter((response) => {
@@ -290,6 +328,18 @@ function buildEventSnapshot(eventId: string, includeHidden: boolean) {
 
   const responsesForView = includeHidden ? usableResponses : publicResponses
 
+  for (const vote of votes) {
+    const current = voteSummaryByResponseId.get(vote.responseId) ?? { up: 0, down: 0, score: 0 }
+    if (vote.direction === 'down') {
+      current.down += 1
+      current.score -= 1
+    } else {
+      current.up += 1
+      current.score += 1
+    }
+    voteSummaryByResponseId.set(vote.responseId, current)
+  }
+
   const engagementTimeline = new Map<string, number>()
   for (const response of usableResponses) {
     const bucket = formatTime(response.createdAt)
@@ -308,6 +358,96 @@ function buildEventSnapshot(eventId: string, includeHidden: boolean) {
       moderationState: response.moderationState,
       highlighted: response.highlighted,
     }))
+
+  const ideaFeed = responsesForView
+    .filter((response) => response.responseType === 'feedback')
+    .map((response) => {
+      const attendee = getAttendeeMeta(response.content)
+      const voteSummary = voteSummaryByResponseId.get(response.id) ?? { up: 0, down: 0, score: 0 }
+      return {
+        id: response.id,
+        interactionId: response.interactionId,
+        interactionPrompt: interactionById.get(response.interactionId)?.prompt ?? 'Idea',
+        text: String(response.content.text ?? ''),
+        createdAt: response.createdAt,
+        timeLabel: formatTime(response.createdAt),
+        nickname: attendee.nickname,
+        team: attendee.team,
+        sentiment: analysisByResponseId.get(response.id)?.sentiment ?? 'neutral',
+        votes: voteSummary,
+      }
+    })
+    .sort((left, right) => right.votes.score - left.votes.score || right.createdAt.localeCompare(left.createdAt))
+
+  const teamSummary = new Map(
+    teams.map((team) => [
+      team,
+      {
+        team,
+        points: 0,
+        contributors: new Set<string>(),
+        contributions: 0,
+        ideas: 0,
+        questions: 0,
+        votesReceived: 0,
+      },
+    ]),
+  )
+  const uniqueParticipants = new Set<string>()
+  const responsePoints: Record<InteractionType, number> = {
+    question: 5,
+    feedback: 6,
+    poll: 3,
+    rating: 2,
+    reaction: 1,
+  }
+
+  for (const response of usableResponses) {
+    const attendee = getAttendeeMeta(response.content)
+    if (!attendee.attendeeKey || !attendee.team) {
+      continue
+    }
+
+    uniqueParticipants.add(attendee.attendeeKey)
+    const team = teamSummary.get(attendee.team) ?? {
+      team: attendee.team,
+      points: 0,
+      contributors: new Set<string>(),
+      contributions: 0,
+      ideas: 0,
+      questions: 0,
+      votesReceived: 0,
+    }
+    team.contributors.add(attendee.attendeeKey)
+    team.contributions += 1
+    team.points += responsePoints[response.responseType] ?? 1
+
+    if (response.responseType === 'feedback') {
+      team.ideas += 1
+      const voteSummary = voteSummaryByResponseId.get(response.id) ?? { up: 0, down: 0, score: 0 }
+      team.votesReceived += voteSummary.up
+      team.points += voteSummary.up * 2
+      team.points -= voteSummary.down
+    }
+
+    if (response.responseType === 'question') {
+      team.questions += 1
+    }
+
+    teamSummary.set(team.team, team)
+  }
+
+  const teamLeaderboard = [...teamSummary.values()]
+    .map((team) => ({
+      team: team.team,
+      points: team.points,
+      contributors: team.contributors.size,
+      contributions: team.contributions,
+      ideas: team.ideas,
+      questions: team.questions,
+      votesReceived: team.votesReceived,
+    }))
+    .sort((left, right) => right.points - left.points || right.contributions - left.contributions || left.team.localeCompare(right.team))
 
   const pollResults = interactions
     .filter((interaction) => interaction.type === 'poll')
@@ -389,11 +529,14 @@ function buildEventSnapshot(eventId: string, includeHidden: boolean) {
       pollParticipation: totalResponses ? Math.round((pollResponseCount / totalResponses) * 100) : 0,
       averageRating: avgRating,
       reactionCount,
+      uniqueParticipants: uniqueParticipants.size,
       timeline: [...engagementTimeline.entries()].map(([time, value]) => ({ time, value })),
     },
     analytics,
     questionStream,
     presenterQuestions: questionStream.filter((question) => question.moderationState !== 'hidden').slice(0, 12),
+    ideaFeed,
+    teamLeaderboard,
     pollResults,
     ratingResults,
     reactionTotals: [...reactionTotals.entries()].map(([label, value]) => ({ label, value })),
@@ -779,7 +922,7 @@ app.get('/api/events/code/:code', (req, res) => {
     snapshot,
     privacy: {
       notice:
-        'Responses are anonymous. The app stores submissions, timestamps, moderation state, and derived analysis, but does not collect names, emails, attendee accounts, or persistent audience identifiers.',
+        'Responses stay anonymous. The app stores your chosen nickname, team, submissions, vote activity, timestamps, moderation state, and derived analysis for this room, but does not collect names, emails, or attendee accounts.',
     },
   })
 })
@@ -802,13 +945,24 @@ app.post('/api/events/code/:code/responses', (req, res) => {
     return
   }
 
+  const parsedAttendee = attendeeProfileSchema.safeParse(req.body?.attendee)
+  if (!parsedAttendee.success) {
+    res.status(400).json({ error: 'Choose an anonymous nickname and team before joining the townhall.' })
+    return
+  }
+  const attendee = normalizeProfile(parsedAttendee.data)
+  if (!getConfiguredTeams(event).includes(attendee.team)) {
+    res.status(400).json({ error: 'Choose a valid townhall team.' })
+    return
+  }
+
   const interaction = getInteraction(String(req.body?.interactionId ?? ''))
   if (!interaction || interaction.eventId !== event.id || interaction.status !== 'active') {
     res.status(400).json({ error: 'Interaction is unavailable.' })
     return
   }
 
-  const rateKey = `${req.ip}:${event.id}:${interaction.id}`
+  const rateKey = `${req.ip}:${attendee.attendeeKey}:${event.id}:${interaction.id}`
   const lastSubmission = lastSubmissionByKey.get(rateKey) ?? 0
   if (Date.now() - lastSubmission < rateLimitWindowMs) {
     res.status(429).json({ error: 'Please wait a moment before submitting again.' })
@@ -828,7 +982,7 @@ app.post('/api/events/code/:code/responses', (req, res) => {
         res.status(400).json({ error: 'Text responses must be between 3 and 400 characters.' })
         return
       }
-      content = { text: parsed.data.text.trim() }
+      content = { text: parsed.data.text.trim(), ...attendee }
       moderationState = interaction.type === 'question' ? 'pending' : 'visible'
       break
     }
@@ -840,7 +994,7 @@ app.post('/api/events/code/:code/responses', (req, res) => {
         res.status(400).json({ error: `Choose a rating between 1 and ${scale}.` })
         return
       }
-      content = { value: parsed.data.value }
+      content = { value: parsed.data.value, ...attendee }
       moderationState = 'visible'
       break
     }
@@ -860,7 +1014,7 @@ app.post('/api/events/code/:code/responses', (req, res) => {
         res.status(400).json({ error: 'One or more selected options are invalid.' })
         return
       }
-      content = { selections: parsed.data.selections }
+      content = { selections: parsed.data.selections, ...attendee }
       moderationState = 'visible'
       break
     }
@@ -871,7 +1025,7 @@ app.post('/api/events/code/:code/responses', (req, res) => {
         res.status(400).json({ error: 'Choose a valid reaction.' })
         return
       }
-      content = { value: parsed.data.value }
+      content = { value: parsed.data.value, ...attendee }
       moderationState = 'visible'
       break
     }
@@ -900,6 +1054,44 @@ app.post('/api/events/code/:code/responses', (req, res) => {
         ? 'Question received. It is waiting for organiser approval before appearing publicly.'
         : `${toTitle(interaction.type)} captured successfully.`,
   })
+})
+
+app.post('/api/events/code/:code/responses/:responseId/vote', (req, res) => {
+  const event = getEventByCode(String(req.params.code))
+  if (!event || event.status !== 'active') {
+    res.status(404).json({ error: 'Event not found or inactive.' })
+    return
+  }
+
+  const response = getResponse(String(req.params.responseId))
+  if (!response || response.eventId !== event.id || response.responseType !== 'feedback') {
+    res.status(404).json({ error: 'Idea not found.' })
+    return
+  }
+
+  const parsedAttendee = attendeeProfileSchema.safeParse(req.body?.attendee)
+  const parsedVote = z.object({ direction: z.enum(['up', 'down']) }).safeParse(req.body)
+  if (!parsedAttendee.success || !parsedVote.success) {
+    res.status(400).json({ error: 'Valid attendee and vote direction are required.' })
+    return
+  }
+
+  const attendee = normalizeProfile(parsedAttendee.data)
+  const author = getAttendeeMeta(response.content)
+  if (author.attendeeKey && author.attendeeKey === attendee.attendeeKey) {
+    res.status(400).json({ error: 'You cannot vote on your own idea.' })
+    return
+  }
+
+  upsertResponseVote({
+    eventId: event.id,
+    responseId: response.id,
+    voterKey: attendee.attendeeKey,
+    direction: parsedVote.data.direction,
+  })
+
+  void broadcastEvent(event.id)
+  res.json({ ok: true })
 })
 
 io.on('connection', (socket) => {

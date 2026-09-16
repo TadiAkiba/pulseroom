@@ -30,6 +30,39 @@ export type MetricTimelinePoint = {
   value: number
 }
 
+export type AnonymousAttendeeProfile = {
+  attendeeKey: string
+  nickname: string
+  team: string
+}
+
+export type IdeaFeedItem = {
+  id: string
+  interactionId: string
+  interactionPrompt: string
+  text: string
+  createdAt: string
+  timeLabel: string
+  nickname: string
+  team: string
+  sentiment: 'positive' | 'neutral' | 'negative'
+  votes: {
+    up: number
+    down: number
+    score: number
+  }
+}
+
+export type TeamLeaderboardEntry = {
+  team: string
+  points: number
+  contributors: number
+  contributions: number
+  ideas: number
+  questions: number
+  votesReceived: number
+}
+
 export type EventSnapshot = {
   event: EventRecord
   interactions: InteractionRecord[]
@@ -40,6 +73,7 @@ export type EventSnapshot = {
     pollParticipation: number
     averageRating: number
     reactionCount: number
+    uniqueParticipants: number
     timeline: MetricTimelinePoint[]
   }
   analytics: {
@@ -76,6 +110,8 @@ export type EventSnapshot = {
     moderationState: ModerationState
     highlighted: boolean
   }>
+  ideaFeed: IdeaFeedItem[]
+  teamLeaderboard: TeamLeaderboardEntry[]
   pollResults: Array<{
     id: string
     prompt: string

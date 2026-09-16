@@ -7,17 +7,19 @@ import { Alert } from '../components/ui/Alert.tsx'
 import { Badge } from '../components/ui/Badge.tsx'
 import { Button } from '../components/ui/Button.tsx'
 import { Card } from '../components/ui/Card.tsx'
+import { Field, Input, Select, Textarea } from '../components/ui/Field.tsx'
 import { Progress } from '../components/ui/Progress.tsx'
-import { Textarea } from '../components/ui/Field.tsx'
 import { api } from '../lib/api.ts'
 import { convexPublicSyncEnabled, convexQueries } from '../lib/convex.ts'
 import { socketUrl } from '../lib/realtime.ts'
-import type { EventPageData, EventSnapshot, InteractionRecord } from '../types.ts'
+import type { AnonymousAttendeeProfile, EventPageData, EventSnapshot, InteractionRecord } from '../types.ts'
 
 type SubmissionState = Record<string, string>
 type SubmittedState = Record<string, boolean>
 
 const milestoneSteps = [1, 3, 5, 8, 12]
+const nicknameAdjectives = ['Bright', 'Curious', 'Swift', 'Bold', 'Sharp', 'Calm', 'Clever', 'Signal']
+const nicknameNouns = ['Nova', 'Spark', 'Orbit', 'Pulse', 'Beacon', 'Echo', 'Vector', 'Wave']
 
 function getLevel(progress: number) {
   if (progress >= 8) {
@@ -59,8 +61,47 @@ function setStoredProgress(code: string, value: number) {
   localStorage.setItem(`pulse-room-progress:${code}`, String(value))
 }
 
+function getProfileStorageKey(code: string) {
+  return `pulse-room-profile:${code}`
+}
+
+function getStoredProfile(code: string) {
+  const raw = localStorage.getItem(getProfileStorageKey(code))
+  if (!raw) {
+    return null
+  }
+
+  try {
+    return JSON.parse(raw) as AnonymousAttendeeProfile
+  } catch {
+    return null
+  }
+}
+
+function setStoredProfile(code: string, profile: AnonymousAttendeeProfile) {
+  localStorage.setItem(getProfileStorageKey(code), JSON.stringify(profile))
+}
+
+function createAttendeeKey() {
+  return `attendee-${Math.random().toString(36).slice(2, 12)}${Date.now().toString(36)}`
+}
+
+function generateNickname() {
+  const adjective = nicknameAdjectives[Math.floor(Math.random() * nicknameAdjectives.length)]
+  const noun = nicknameNouns[Math.floor(Math.random() * nicknameNouns.length)]
+  const suffix = Math.floor(10 + Math.random() * 90)
+  return `${adjective}${noun}${suffix}`
+}
+
+function getEventTeams(snapshot: EventSnapshot | null) {
+  const rawTeams = Array.isArray(snapshot?.event.config.teams) ? snapshot?.event.config.teams : []
+  const teams = rawTeams.map(String).map((team) => team.trim()).filter(Boolean)
+  return teams.length > 0 ? teams : ['Catalysts', 'Builders', 'Navigators', 'Trailblazers']
+}
+
 export function AttendeePage() {
   const { code = '' } = useParams()
+  const initialProfile = getStoredProfile(code)
   const convexSnapshot = useQuery(
     convexQueries.getPublicByCode,
     convexPublicSyncEnabled && code ? { code } : 'skip',
@@ -76,8 +117,14 @@ export function AttendeePage() {
   const [progressByCode, setProgressByCode] = useState<Record<string, number>>({})
   const [streak, setStreak] = useState(0)
   const [currentIndex, setCurrentIndex] = useState(0)
+  const [profile, setProfile] = useState<AnonymousAttendeeProfile | null>(initialProfile)
+  const [draftProfile, setDraftProfile] = useState({
+    nickname: initialProfile?.nickname ?? generateNickname(),
+    team: initialProfile?.team ?? 'Catalysts',
+  })
   const liveSnapshot = (convexSnapshot as EventSnapshot | null | undefined) ?? snapshot
   const progress = progressByCode[code] ?? getStoredProgress(code)
+  const teams = useMemo(() => getEventTeams(liveSnapshot), [liveSnapshot])
 
   useEffect(() => {
     let socket: Socket | undefined
@@ -89,6 +136,11 @@ export function AttendeePage() {
         setSnapshot(response.snapshot)
         setCurrentIndex(0)
         setLoading(false)
+        const nextTeams = getEventTeams(response.snapshot)
+        setDraftProfile((current) => ({
+          nickname: current.nickname || generateNickname(),
+          team: nextTeams.includes(current.team) ? current.team : nextTeams[0] ?? 'Catalysts',
+        }))
 
         socket = io(socketUrl, {
           transports: ['websocket'],
@@ -110,12 +162,18 @@ export function AttendeePage() {
   }, [code])
 
   async function submit(interaction: InteractionRecord, payload: Record<string, unknown>) {
+    if (!profile) {
+      setError('Pick your anonymous nickname and team before participating.')
+      return
+    }
+
     setStatus('')
     setError('')
 
     try {
       const response = await api.submitResponse(code, {
         interactionId: interaction.id,
+        attendee: profile,
         ...payload,
       })
       setStatus(response.message)
@@ -140,6 +198,45 @@ export function AttendeePage() {
     } catch (submissionError) {
       setError(submissionError instanceof Error ? submissionError.message : 'Unable to submit response.')
     }
+  }
+
+  async function voteIdea(responseId: string, direction: 'up' | 'down') {
+    if (!profile) {
+      setError('Pick your anonymous nickname and team before voting.')
+      return
+    }
+
+    setError('')
+    try {
+      await api.voteIdea(code, responseId, {
+        direction,
+        attendee: profile,
+      })
+    } catch (voteError) {
+      setError(voteError instanceof Error ? voteError.message : 'Unable to record your vote.')
+    }
+  }
+
+  function saveProfile() {
+    const nickname = draftProfile.nickname.trim()
+    if (nickname.length < 2) {
+      setError('Choose a nickname with at least 2 characters.')
+      return
+    }
+    if (!teams.includes(draftProfile.team)) {
+      setError('Choose a valid townhall team.')
+      return
+    }
+
+    const nextProfile: AnonymousAttendeeProfile = {
+      attendeeKey: profile?.attendeeKey ?? createAttendeeKey(),
+      nickname,
+      team: draftProfile.team,
+    }
+    setProfile(nextProfile)
+    setStoredProfile(code, nextProfile)
+    setStatus(`You are in as ${nextProfile.nickname} on ${nextProfile.team}.`)
+    setError('')
   }
 
   const completion = useMemo(() => {
@@ -177,6 +274,15 @@ export function AttendeePage() {
     return 'All session milestones unlocked.'
   }, [nextMilestone, progress])
 
+  const quickActions = useMemo(
+    () => [
+      { label: 'Share ideas', type: 'feedback' as const, copy: 'Ideas, fears, and opportunities from the room.' },
+      { label: 'Live polls', type: 'poll' as const, copy: 'Vote on what the townhall should do next.' },
+      { label: 'Ask a question', type: 'question' as const, copy: 'Send anonymous questions for leadership to answer.' },
+    ],
+    [],
+  )
+
   if (loading) {
     return (
       <main className="page center-state">
@@ -203,9 +309,16 @@ export function AttendeePage() {
     <main className="page attendee-page">
       <section className="attendee-hero">
         <div>
-          <span className="eyebrow">Event code {data.event.code}</span>
+          <span className="eyebrow">AI Townhall Dashboard • code {data.event.code}</span>
           <h1>{data.event.name}</h1>
           <p className="lede">{data.event.description}</p>
+          {profile ? (
+            <div className="achievement-row">
+              <Badge variant="success">{profile.nickname}</Badge>
+              <Badge variant="info">{profile.team}</Badge>
+              <Badge variant="outline">{level}</Badge>
+            </div>
+          ) : null}
         </div>
         <div className="progress-card">
           <span>Participation progress</span>
@@ -221,6 +334,46 @@ export function AttendeePage() {
         </div>
       </section>
 
+      {!profile ? (
+        <Card className="townhall-setup">
+          <div className="stack-list">
+            <div>
+              <span className="eyebrow">Step 1</span>
+              <h2>Choose or generate your anonymous nickname</h2>
+              <p className="muted">Nicknames and teams are visible in the townhall feed, but they are not linked to your real identity.</p>
+            </div>
+            <Button type="button" variant="outline" onClick={() => setDraftProfile((current) => ({ ...current, nickname: generateNickname() }))}>
+              Generate nickname
+            </Button>
+          </div>
+          <div className="townhall-setup__grid">
+            <Field label="Anonymous nickname">
+              <Input
+                value={draftProfile.nickname}
+                onChange={(event) => setDraftProfile((current) => ({ ...current, nickname: event.target.value }))}
+                maxLength={24}
+                placeholder="BrightSpark42"
+              />
+            </Field>
+            <Field label="Team">
+              <Select
+                value={draftProfile.team}
+                onChange={(event) => setDraftProfile((current) => ({ ...current, team: event.target.value }))}
+              >
+                {teams.map((team) => (
+                  <option key={team} value={team}>
+                    {team}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+          <Button type="button" onClick={saveProfile}>
+            Join the AI Townhall
+          </Button>
+        </Card>
+      ) : null}
+
       <Card className="attendee-panel">
         <div className="stats-row">
           <div>
@@ -228,8 +381,8 @@ export function AttendeePage() {
             <span>Live responses</span>
           </div>
           <div>
-            <strong>{liveSnapshot.metrics.reactionCount}</strong>
-            <span>Reactions fired</span>
+            <strong>{liveSnapshot.metrics.uniqueParticipants}</strong>
+            <span>Anonymous participants</span>
           </div>
           <div>
             <strong>{liveSnapshot.analytics.sentiment.positive}%</strong>
@@ -254,7 +407,7 @@ export function AttendeePage() {
           <div className="achievement-card">
             <span>Room momentum</span>
             <strong>{roomMomentum}</strong>
-            <p>The crowd energy rises as responses and reactions come in.</p>
+            <p>The crowd energy rises as ideas, votes, and reactions come in.</p>
           </div>
         </div>
         {unlockedMilestones.length > 0 ? (
@@ -275,64 +428,152 @@ export function AttendeePage() {
         {error ? <Alert variant="danger">{error}</Alert> : null}
       </Card>
 
-      <section className="prompt-stage">
-        <div className="prompt-stage__backdrop" aria-hidden="true" />
-        {currentInteraction ? (
-          <InteractionCard
-            key={currentInteraction.id}
-            interaction={currentInteraction}
-            step={currentIndex + 1}
-            totalSteps={data.interactions.length}
-            answered={Boolean(submittedByInteraction[currentInteraction.id])}
-            streak={streak}
-            nextMilestone={nextMilestone}
-            canGoBack={currentIndex > 0}
-            canGoNext={currentIndex < data.interactions.length - 1}
-            onBack={() => {
-              setStatus('')
-              setError('')
-              setCurrentIndex((current) => Math.max(0, current - 1))
-            }}
-            onNext={() => {
-              setStatus('')
-              setError('')
-              setCurrentIndex((current) => Math.min(data.interactions.length - 1, current + 1))
-            }}
-            value={submissions[currentInteraction.id] ?? ''}
-            onChange={(value) =>
-              setSubmissions((current) => ({
-                ...current,
-                [currentInteraction.id]: value,
-              }))
-            }
-            onSubmit={(payload) => submit(currentInteraction, payload)}
-          />
-        ) : null}
-      </section>
+      {profile ? (
+        <>
+          <section className="townhall-actions">
+            {quickActions.map((action) => {
+              const interactionIndex = data.interactions.findIndex((interaction) => interaction.type === action.type)
+              return (
+                <Card key={action.type} className="townhall-card">
+                  <span className="eyebrow">{action.label}</span>
+                  <h3>{action.copy}</h3>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={interactionIndex < 0}
+                    onClick={() => {
+                      setStatus('')
+                      setError('')
+                      if (interactionIndex >= 0) {
+                        setCurrentIndex(interactionIndex)
+                      }
+                    }}
+                  >
+                    Open {action.label}
+                  </Button>
+                </Card>
+              )
+            })}
+          </section>
 
-      <section className="prompt-queue">
-        <div>
-          <span className="eyebrow">Sequential flow</span>
-          <h2>
-            {answeredCount} of {data.interactions.length} prompts answered
-          </h2>
-        </div>
-        <div className="prompt-dots" aria-label="Interaction progress">
-          {data.interactions.map((interaction, index) => (
-            <button
-              key={interaction.id}
-              type="button"
-              className={`prompt-dot ${index === currentIndex ? 'active' : ''} ${submittedByInteraction[interaction.id] ? 'answered' : ''}`}
-              onClick={() => {
-                setStatus('')
-                setError('')
-                setCurrentIndex(index)
-              }}
-              aria-label={`Open prompt ${index + 1}`}
-            />
-          ))}
-        </div>
-      </section>
+          <section className="townhall-grid">
+            <div className="townhall-grid__main">
+              <section className="prompt-stage">
+                <div className="prompt-stage__backdrop" aria-hidden="true" />
+                {currentInteraction ? (
+                  <InteractionCard
+                    key={currentInteraction.id}
+                    interaction={currentInteraction}
+                    step={currentIndex + 1}
+                    totalSteps={data.interactions.length}
+                    answered={Boolean(submittedByInteraction[currentInteraction.id])}
+                    streak={streak}
+                    nextMilestone={nextMilestone}
+                    canGoBack={currentIndex > 0}
+                    canGoNext={currentIndex < data.interactions.length - 1}
+                    onBack={() => {
+                      setStatus('')
+                      setError('')
+                      setCurrentIndex((current) => Math.max(0, current - 1))
+                    }}
+                    onNext={() => {
+                      setStatus('')
+                      setError('')
+                      setCurrentIndex((current) => Math.min(data.interactions.length - 1, current + 1))
+                    }}
+                    value={submissions[currentInteraction.id] ?? ''}
+                    onChange={(value) =>
+                      setSubmissions((current) => ({
+                        ...current,
+                        [currentInteraction.id]: value,
+                      }))
+                    }
+                    onSubmit={(payload) => submit(currentInteraction, payload)}
+                  />
+                ) : null}
+              </section>
+
+              <section className="prompt-queue">
+                <div>
+                  <span className="eyebrow">Townhall flow</span>
+                  <h2>
+                    {answeredCount} of {data.interactions.length} prompts answered
+                  </h2>
+                </div>
+                <div className="prompt-dots" aria-label="Interaction progress">
+                  {data.interactions.map((interaction, index) => (
+                    <button
+                      key={interaction.id}
+                      type="button"
+                      className={`prompt-dot ${index === currentIndex ? 'active' : ''} ${submittedByInteraction[interaction.id] ? 'answered' : ''}`}
+                      onClick={() => {
+                        setStatus('')
+                        setError('')
+                        setCurrentIndex(index)
+                      }}
+                      aria-label={`Open prompt ${index + 1}`}
+                    />
+                  ))}
+                </div>
+              </section>
+            </div>
+
+            <div className="townhall-grid__side">
+              <Card className="townhall-card">
+                <span className="eyebrow">Live sentiment & feed</span>
+                <h3>Ideas, fears, and opportunities</h3>
+                <div className="idea-feed">
+                  {liveSnapshot.ideaFeed.map((idea) => (
+                    <article key={idea.id} className="idea-card">
+                      <div className="achievement-row">
+                        <Badge variant="info">{idea.team}</Badge>
+                        <Badge variant="outline">{idea.nickname}</Badge>
+                        <Badge variant={idea.sentiment === 'positive' ? 'success' : idea.sentiment === 'negative' ? 'danger' : 'warning'}>
+                          {idea.sentiment}
+                        </Badge>
+                      </div>
+                      <strong>{idea.text}</strong>
+                      <p className="muted">{idea.timeLabel}</p>
+                      <div className="vote-row">
+                        <span>Score {idea.votes.score}</span>
+                        <div className="achievement-row">
+                          <Button type="button" size="sm" variant="outline" onClick={() => voteIdea(idea.id, 'up')}>
+                            ▲ {idea.votes.up}
+                          </Button>
+                          <Button type="button" size="sm" variant="outline" onClick={() => voteIdea(idea.id, 'down')}>
+                            ▼ {idea.votes.down}
+                          </Button>
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                  {liveSnapshot.ideaFeed.length === 0 ? <p className="muted">Ideas will appear here as the room starts sharing.</p> : null}
+                </div>
+              </Card>
+
+              <Card className="townhall-card">
+                <span className="eyebrow">Team leaderboard</span>
+                <h3>AI Champions</h3>
+                <div className="leaderboard-list">
+                  {liveSnapshot.teamLeaderboard.map((entry, index) => (
+                    <article key={entry.team} className="leaderboard-row">
+                      <div>
+                        <strong>
+                          #{index + 1} {entry.team}
+                        </strong>
+                        <p>
+                          {entry.contributors} contributors • {entry.contributions} actions • {entry.votesReceived} upvotes earned
+                        </p>
+                      </div>
+                      <Badge variant={index === 0 ? 'success' : 'outline'}>{entry.points} pts</Badge>
+                    </article>
+                  ))}
+                </div>
+              </Card>
+            </div>
+          </section>
+        </>
+      ) : null}
     </main>
   )
 }
@@ -390,6 +631,17 @@ function InteractionCard({
     onChange('')
   }
 
+  const eyebrow =
+    interaction.type === 'question'
+      ? 'Ask a question'
+      : interaction.type === 'feedback'
+        ? 'Share an idea'
+        : interaction.type === 'poll'
+          ? 'Live poll'
+          : interaction.type === 'rating'
+            ? 'Rate the townhall'
+            : 'React live'
+
   if (interaction.type === 'question' || interaction.type === 'feedback') {
     return (
       <Card className="interaction-card interaction-card--modal">
@@ -402,14 +654,14 @@ function InteractionCard({
             {streak > 1 ? <Badge variant="warning">Streak x{streak}</Badge> : null}
           </div>
         </div>
-        <span className="eyebrow">{interaction.type === 'question' ? 'Ask anonymously' : 'Share feedback'}</span>
+        <span className="eyebrow">{eyebrow}</span>
         <h2>{interaction.prompt}</h2>
         <p className="prompt-helper">
           {nextMilestone ? `Answer this to get closer to the ${nextMilestone}-contribution unlock.` : 'You have already unlocked every session milestone.'}
         </p>
         <form onSubmit={submitText}>
           <Textarea value={value} onChange={(event) => onChange(event.target.value)} rows={4} maxLength={400} />
-          <Button type="submit">Submit {interaction.type}</Button>
+          <Button type="submit">Submit</Button>
         </form>
         {renderNavigation()}
       </Card>
@@ -429,7 +681,7 @@ function InteractionCard({
             {streak > 1 ? <Badge variant="warning">Streak x{streak}</Badge> : null}
           </div>
         </div>
-        <span className="eyebrow">Rate the session</span>
+        <span className="eyebrow">{eyebrow}</span>
         <h2>{interaction.prompt}</h2>
         <p className="prompt-helper">
           {nextMilestone ? `Quick ratings help unlock the ${nextMilestone}-contribution milestone.` : 'Every session milestone is already unlocked.'}
@@ -469,7 +721,7 @@ function InteractionCard({
             {streak > 1 ? <Badge variant="warning">Streak x{streak}</Badge> : null}
           </div>
         </div>
-        <span className="eyebrow">Live poll</span>
+        <span className="eyebrow">{eyebrow}</span>
         <h2>{interaction.prompt}</h2>
         <p className="prompt-helper">
           {nextMilestone ? `Cast your vote to move toward the ${nextMilestone}-contribution unlock.` : 'Your milestone track is already complete.'}
@@ -513,7 +765,7 @@ function InteractionCard({
           {streak > 1 ? <Badge variant="warning">Streak x{streak}</Badge> : null}
         </div>
       </div>
-      <span className="eyebrow">React live</span>
+      <span className="eyebrow">{eyebrow}</span>
       <h2>{interaction.prompt}</h2>
       <p className="prompt-helper">
         {nextMilestone ? `Fire a reaction to push toward the ${nextMilestone}-contribution unlock.` : 'You have already cleared the milestone track.'}

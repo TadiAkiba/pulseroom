@@ -24,6 +24,7 @@ import { Card, CardHeader, CardTitle, CardDescription } from '../components/ui/C
 import { Field, Input, Select, Textarea } from '../components/ui/Field.tsx'
 import { api } from '../lib/api.ts'
 import { parseInteractionFile } from '../lib/interactionImport.ts'
+import { socketUrl } from '../lib/realtime.ts'
 import type { EventSnapshot } from '../types.ts'
 
 const sentimentColors = ['#34d399', '#a78bfa', '#fb7185']
@@ -50,8 +51,9 @@ export function EventDashboardPage() {
       .then((response) => {
         setSnapshot(response)
         setLoading(false)
-        socket = io({
+        socket = io(socketUrl, {
           transports: ['websocket'],
+          withCredentials: true,
         })
         socket.emit('event:join-admin', response.event.id)
         socket.on('event:update-admin', (nextSnapshot: EventSnapshot) => {
@@ -377,9 +379,18 @@ export function EventDashboardPage() {
             >
               <Input name="interaction-file" type="file" accept=".json,.csv,application/json,text/csv" />
             </Field>
-            <Button type="submit" variant="outline" disabled={saving}>
-              Upload interactions
-            </Button>
+            <div className="import-actions">
+              <a
+                className={buttonClasses({ variant: 'ghost' })}
+                href="/interaction-import-template.csv"
+                download="interaction-import-template.csv"
+              >
+                Download CSV template
+              </a>
+              <Button type="submit" variant="outline" disabled={saving}>
+                Upload interactions
+              </Button>
+            </div>
           </form>
         </Card>
       </section>

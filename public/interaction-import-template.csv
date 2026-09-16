@@ -1,0 +1,6 @@
+type,prompt,options,scale,allowMultiple,status,ordering
+question,What question would you like the speaker to answer next?,,,false,active,1
+feedback,What did you think about this session so far?,,,false,active,2
+rating,How valuable was this session?,,5,false,active,3
+poll,Which topic should we cover next?,Implementation roadmap|Pricing strategy|Customer onboarding|AI governance,,true,active,4
+reaction,How are you feeling right now?,Like|Interesting|Confused|Agree|Disagree|Excited,,false,active,5

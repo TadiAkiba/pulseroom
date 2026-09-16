@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useQuery } from 'convex/react'
 import { useParams } from 'react-router-dom'
 import { io, type Socket } from 'socket.io-client'
 import {
@@ -15,17 +16,39 @@ import {
 import { Badge } from '../components/ui/Badge.tsx'
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/Tabs.tsx'
 import { api } from '../lib/api.ts'
+import { convexPublicSyncEnabled, convexQueries } from '../lib/convex.ts'
+import { socketUrl } from '../lib/realtime.ts'
 import type { EventSnapshot } from '../types.ts'
 
 const views = ['questions', 'word-cloud', 'sentiment', 'polls', 'ratings', 'engagement', 'insights'] as const
 type PresenterView = (typeof views)[number]
+const presenterMilestones = [10, 25, 50, 100, 200]
+
+function getPresenterMomentum(totalResponses: number, reactionCount: number) {
+  const score = totalResponses + reactionCount * 2
+  if (score >= 200) {
+    return { label: 'On fire', variant: 'warning' as const }
+  }
+  if (score >= 100) {
+    return { label: 'Electric', variant: 'success' as const }
+  }
+  if (score >= 40) {
+    return { label: 'Buzzing', variant: 'info' as const }
+  }
+  return { label: 'Warming up', variant: 'outline' as const }
+}
 
 export function PresenterPage() {
   const { code = '' } = useParams()
+  const convexSnapshot = useQuery(
+    convexQueries.getPublicByCode,
+    convexPublicSyncEnabled && code ? { code } : 'skip',
+  )
   const [snapshot, setSnapshot] = useState<EventSnapshot | null>(null)
   const [view, setView] = useState<PresenterView>('questions')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const liveSnapshot = (convexSnapshot as EventSnapshot | null | undefined) ?? snapshot
 
   useEffect(() => {
     let socket: Socket | undefined
@@ -35,8 +58,9 @@ export function PresenterPage() {
       .then((response) => {
         setSnapshot(response)
         setLoading(false)
-        socket = io({
+        socket = io(socketUrl, {
           transports: ['websocket'],
+          withCredentials: true,
         })
         socket.emit('event:join-public', response.event.id)
         socket.on('event:update-public', (nextSnapshot: EventSnapshot) => {
@@ -54,16 +78,36 @@ export function PresenterPage() {
   }, [code])
 
   const sentimentData = useMemo(() => {
-    if (!snapshot) {
+    if (!liveSnapshot) {
       return []
     }
 
     return [
-      { label: 'Positive', value: snapshot.analytics.sentiment.positive },
-      { label: 'Neutral', value: snapshot.analytics.sentiment.neutral },
-      { label: 'Negative', value: snapshot.analytics.sentiment.negative },
+      { label: 'Positive', value: liveSnapshot.analytics.sentiment.positive },
+      { label: 'Neutral', value: liveSnapshot.analytics.sentiment.neutral },
+      { label: 'Negative', value: liveSnapshot.analytics.sentiment.negative },
     ]
-  }, [snapshot])
+  }, [liveSnapshot])
+
+  const totalEngagement = useMemo(
+    () => (liveSnapshot?.metrics.totalResponses ?? 0) + (liveSnapshot?.metrics.reactionCount ?? 0),
+    [liveSnapshot?.metrics.reactionCount, liveSnapshot?.metrics.totalResponses],
+  )
+
+  const momentum = useMemo(
+    () => getPresenterMomentum(liveSnapshot?.metrics.totalResponses ?? 0, liveSnapshot?.metrics.reactionCount ?? 0),
+    [liveSnapshot?.metrics.reactionCount, liveSnapshot?.metrics.totalResponses],
+  )
+
+  const nextMilestone = useMemo(
+    () => presenterMilestones.find((milestone) => milestone > totalEngagement) ?? null,
+    [totalEngagement],
+  )
+
+  const unlockedMilestones = useMemo(
+    () => presenterMilestones.filter((milestone) => milestone <= totalEngagement),
+    [totalEngagement],
+  )
 
   if (loading) {
     return (
@@ -75,7 +119,7 @@ export function PresenterPage() {
     )
   }
 
-  if (error || !snapshot) {
+  if (error || !liveSnapshot) {
     return (
       <main className="presenter-shell">
         <div className="presenter-center">
@@ -90,8 +134,11 @@ export function PresenterPage() {
     <main className="presenter-shell">
       <header className="presenter-header">
         <div>
-          <Badge variant="info">{snapshot.event.name}</Badge>
-          <h1>{snapshot.event.code}</h1>
+          <div className="achievement-row">
+            <Badge variant="info">{liveSnapshot.event.name}</Badge>
+            <Badge variant={momentum.variant}>{momentum.label}</Badge>
+          </div>
+          <h1>{liveSnapshot.event.code}</h1>
         </div>
         <Tabs className="presenter-tabs">
           <TabsList>
@@ -104,16 +151,52 @@ export function PresenterPage() {
         </Tabs>
       </header>
 
-      <section className="presenter-stage">
+      <section className="presenter-marquee">
+        <article className="presenter-card presenter-card--gamified">
+          <span>Crowd momentum</span>
+          <strong>{momentum.label}</strong>
+          <p>
+            {liveSnapshot.metrics.totalResponses} responses and {liveSnapshot.metrics.reactionCount} reactions are driving the room.
+          </p>
+        </article>
+        <article className="presenter-card presenter-card--gamified">
+          <span>Next room unlock</span>
+          <strong>{nextMilestone ? `${nextMilestone} interactions` : 'All milestones cleared'}</strong>
+          <p>
+            {nextMilestone
+              ? `${nextMilestone - totalEngagement} more audience actions to hit the next presenter milestone.`
+              : 'The audience has unlocked every current milestone.'}
+          </p>
+        </article>
+        <article className="presenter-card presenter-card--gamified">
+          <span>Presenter prompt</span>
+          <strong>{view === 'questions' ? 'Keep the Q&A moving' : 'Show the room their impact'}</strong>
+          <p>
+            Use this view to reinforce participation and let attendees see the room respond in real time.
+          </p>
+        </article>
+      </section>
+
+      {unlockedMilestones.length > 0 ? (
+        <section className="presenter-achievements">
+          {unlockedMilestones.map((milestone) => (
+            <Badge key={milestone} variant="outline">
+              {milestone} room unlock
+            </Badge>
+          ))}
+        </section>
+      ) : null}
+
+      <section className={`presenter-stage ${totalEngagement >= 100 ? 'presenter-stage--charged' : ''}`}>
         {view === 'questions' ? (
           <div className="presenter-question-grid">
-            {snapshot.presenterQuestions.slice(0, 6).map((question) => (
+            {liveSnapshot.presenterQuestions.slice(0, 6).map((question) => (
               <article key={question.id} className={`presenter-card ${question.highlighted ? 'highlighted' : ''}`}>
                 <span>{question.timeLabel}</span>
                 <strong>{question.text}</strong>
               </article>
             ))}
-            {snapshot.presenterQuestions.length === 0 ? (
+            {liveSnapshot.presenterQuestions.length === 0 ? (
               <div className="presenter-center">Approved audience questions will appear here.</div>
             ) : null}
           </div>
@@ -121,8 +204,8 @@ export function PresenterPage() {
 
         {view === 'word-cloud' ? (
           <div className="presenter-word-cloud">
-            {snapshot.analytics.wordCloud.length > 0 ? (
-              snapshot.analytics.wordCloud.map((entry) => (
+            {liveSnapshot.analytics.wordCloud.length > 0 ? (
+              liveSnapshot.analytics.wordCloud.map((entry) => (
                 <span key={entry.word} style={{ fontSize: `${entry.weight + 0.5}rem` }}>
                   {entry.word}
                 </span>
@@ -151,9 +234,9 @@ export function PresenterPage() {
         {view === 'polls' ? (
           <div className="presenter-chart">
             <h2>Live poll results</h2>
-            {snapshot.pollResults[0] ? (
+            {liveSnapshot.pollResults[0] ? (
               <ResponsiveContainer width="100%" height={420}>
-                <BarChart data={snapshot.pollResults[0].options}>
+                <BarChart data={liveSnapshot.pollResults[0].options}>
                   <CartesianGrid stroke="#263449" strokeDasharray="3 3" />
                   <XAxis dataKey="label" stroke="#e2e8f0" interval={0} angle={-6} height={60} textAnchor="end" />
                   <YAxis stroke="#e2e8f0" allowDecimals={false} />
@@ -169,7 +252,7 @@ export function PresenterPage() {
 
         {view === 'ratings' ? (
           <div className="presenter-metric-grid">
-            {snapshot.ratingResults.map((rating) => (
+            {liveSnapshot.ratingResults.map((rating) => (
               <article key={rating.id} className="presenter-card">
                 <span>{rating.prompt}</span>
                 <strong>
@@ -178,7 +261,7 @@ export function PresenterPage() {
                 <p>{rating.responses} responses</p>
               </article>
             ))}
-            {snapshot.reactionTotals.map((reaction) => (
+            {liveSnapshot.reactionTotals.map((reaction) => (
               <article key={reaction.label} className="presenter-card">
                 <span>{reaction.label}</span>
                 <strong>{reaction.value}</strong>
@@ -191,8 +274,12 @@ export function PresenterPage() {
         {view === 'engagement' ? (
           <div className="presenter-chart">
             <h2>Participation volume</h2>
+            <p className="presenter-support-copy">
+              Total room activity: <strong>{totalEngagement}</strong> • next milestone:{' '}
+              <strong>{nextMilestone ?? 'complete'}</strong>
+            </p>
             <ResponsiveContainer width="100%" height={420}>
-              <LineChart data={snapshot.metrics.timeline}>
+              <LineChart data={liveSnapshot.metrics.timeline}>
                 <CartesianGrid stroke="#263449" strokeDasharray="3 3" />
                 <XAxis dataKey="time" stroke="#e2e8f0" />
                 <YAxis stroke="#e2e8f0" />
@@ -207,15 +294,15 @@ export function PresenterPage() {
           <div className="presenter-insights">
             <article className="presenter-card">
               <span>Top themes</span>
-              <strong>{snapshot.analytics.themes.map((theme) => theme.theme).join(', ') || 'Waiting for more responses'}</strong>
+              <strong>{liveSnapshot.analytics.themes.map((theme) => theme.theme).join(', ') || 'Waiting for more responses'}</strong>
             </article>
             <article className="presenter-card">
               <span>Frequent words</span>
-              <strong>{snapshot.analytics.keywords.slice(0, 6).map((word) => word.word).join(', ') || 'Not enough data yet'}</strong>
+              <strong>{liveSnapshot.analytics.keywords.slice(0, 6).map((word) => word.word).join(', ') || 'Not enough data yet'}</strong>
             </article>
             <article className="presenter-card wide">
               <span>Emerging concerns</span>
-              <strong>{snapshot.analytics.emergingConcerns.join(' ')}</strong>
+              <strong>{liveSnapshot.analytics.emergingConcerns.join(' ')}</strong>
             </article>
           </div>
         ) : null}

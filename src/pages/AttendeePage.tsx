@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useParams } from 'react-router-dom'
+import { useQuery } from 'convex/react'
 import { io, type Socket } from 'socket.io-client'
 import { Alert } from '../components/ui/Alert.tsx'
 import { Badge } from '../components/ui/Badge.tsx'
@@ -9,10 +10,44 @@ import { Card } from '../components/ui/Card.tsx'
 import { Progress } from '../components/ui/Progress.tsx'
 import { Textarea } from '../components/ui/Field.tsx'
 import { api } from '../lib/api.ts'
+import { convexPublicSyncEnabled, convexQueries } from '../lib/convex.ts'
+import { socketUrl } from '../lib/realtime.ts'
 import type { EventPageData, EventSnapshot, InteractionRecord } from '../types.ts'
 
 type SubmissionState = Record<string, string>
 type SubmittedState = Record<string, boolean>
+
+const milestoneSteps = [1, 3, 5, 8, 12]
+
+function getLevel(progress: number) {
+  if (progress >= 8) {
+    return 'Front-row energy'
+  }
+  if (progress >= 5) {
+    return 'Momentum maker'
+  }
+  if (progress >= 3) {
+    return 'Spark starter'
+  }
+  if (progress >= 1) {
+    return 'Contributor'
+  }
+  return 'Quiet observer'
+}
+
+function getMomentumLabel(totalResponses: number, reactionCount: number) {
+  const score = totalResponses + reactionCount * 2
+  if (score >= 70) {
+    return 'Electric'
+  }
+  if (score >= 35) {
+    return 'Buzzing'
+  }
+  if (score >= 15) {
+    return 'Building'
+  }
+  return 'Warming up'
+}
 
 function getStoredProgress(code: string) {
   const key = `pulse-room-progress:${code}`
@@ -26,6 +61,10 @@ function setStoredProgress(code: string, value: number) {
 
 export function AttendeePage() {
   const { code = '' } = useParams()
+  const convexSnapshot = useQuery(
+    convexQueries.getPublicByCode,
+    convexPublicSyncEnabled && code ? { code } : 'skip',
+  )
   const [data, setData] = useState<EventPageData | null>(null)
   const [snapshot, setSnapshot] = useState<EventSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
@@ -37,6 +76,7 @@ export function AttendeePage() {
   const [progressByCode, setProgressByCode] = useState<Record<string, number>>({})
   const [streak, setStreak] = useState(0)
   const [currentIndex, setCurrentIndex] = useState(0)
+  const liveSnapshot = (convexSnapshot as EventSnapshot | null | undefined) ?? snapshot
   const progress = progressByCode[code] ?? getStoredProgress(code)
 
   useEffect(() => {
@@ -50,8 +90,9 @@ export function AttendeePage() {
         setCurrentIndex(0)
         setLoading(false)
 
-        socket = io({
+        socket = io(socketUrl, {
           transports: ['websocket'],
+          withCredentials: true,
         })
         socket.emit('event:join-public', response.event.id)
         socket.on('event:update-public', (nextSnapshot: EventSnapshot) => {
@@ -113,6 +154,28 @@ export function AttendeePage() {
     () => Object.values(submittedByInteraction).filter(Boolean).length,
     [submittedByInteraction],
   )
+  const level = useMemo(() => getLevel(progress), [progress])
+  const nextMilestone = useMemo(
+    () => milestoneSteps.find((step) => step > progress) ?? null,
+    [progress],
+  )
+  const unlockedMilestones = useMemo(
+    () => milestoneSteps.filter((step) => step <= progress),
+    [progress],
+  )
+  const roomMomentum = useMemo(
+    () => getMomentumLabel(liveSnapshot?.metrics.totalResponses ?? 0, liveSnapshot?.metrics.reactionCount ?? 0),
+    [liveSnapshot?.metrics.reactionCount, liveSnapshot?.metrics.totalResponses],
+  )
+  const milestoneMessage = useMemo(() => {
+    if (progress === 0) {
+      return 'First contribution unlocks your streak.'
+    }
+    if (nextMilestone) {
+      return `${nextMilestone - progress} more to unlock the next milestone.`
+    }
+    return 'All session milestones unlocked.'
+  }, [nextMilestone, progress])
 
   if (loading) {
     return (
@@ -125,7 +188,7 @@ export function AttendeePage() {
     )
   }
 
-  if (loadError || !data || !snapshot) {
+  if (loadError || !data || !liveSnapshot) {
     return (
       <main className="page center-state">
         <Card className="ui-state-card">
@@ -151,26 +214,64 @@ export function AttendeePage() {
           <p>
             {progress} contributions this session • streak {streak}
           </p>
+          <div className="achievement-row">
+            <Badge variant="success">{level}</Badge>
+            {streak > 1 ? <Badge variant="warning">Streak x{streak}</Badge> : null}
+          </div>
         </div>
       </section>
 
       <Card className="attendee-panel">
         <div className="stats-row">
           <div>
-            <strong>{snapshot.metrics.totalResponses}</strong>
+            <strong>{liveSnapshot.metrics.totalResponses}</strong>
             <span>Live responses</span>
           </div>
           <div>
-            <strong>{snapshot.metrics.reactionCount}</strong>
+            <strong>{liveSnapshot.metrics.reactionCount}</strong>
             <span>Reactions fired</span>
           </div>
           <div>
-            <strong>{snapshot.analytics.sentiment.positive}%</strong>
+            <strong>{liveSnapshot.analytics.sentiment.positive}%</strong>
             <span>Positive pulse</span>
           </div>
         </div>
+        <div className="achievement-grid">
+          <div className="achievement-card">
+            <span>Session level</span>
+            <strong>{level}</strong>
+            <p>{milestoneMessage}</p>
+          </div>
+          <div className="achievement-card">
+            <span>Next unlock</span>
+            <strong>{nextMilestone ? `${nextMilestone} contributions` : 'Complete'}</strong>
+            <p>
+              {nextMilestone
+                ? `Keep the streak alive to hit the next audience milestone.`
+                : 'You have reached every session milestone.'}
+            </p>
+          </div>
+          <div className="achievement-card">
+            <span>Room momentum</span>
+            <strong>{roomMomentum}</strong>
+            <p>The crowd energy rises as responses and reactions come in.</p>
+          </div>
+        </div>
+        {unlockedMilestones.length > 0 ? (
+          <div className="achievement-row">
+            {unlockedMilestones.map((milestone) => (
+              <Badge key={milestone} variant="outline">
+                {milestone} unlocked
+              </Badge>
+            ))}
+          </div>
+        ) : null}
         <p className="muted">{data.privacy.notice}</p>
-        {status ? <Alert variant="success">{status}</Alert> : null}
+        {status ? (
+          <Alert variant="success" className="celebration-alert" title="Contribution landed">
+            {status}
+          </Alert>
+        ) : null}
         {error ? <Alert variant="danger">{error}</Alert> : null}
       </Card>
 
@@ -183,6 +284,8 @@ export function AttendeePage() {
             step={currentIndex + 1}
             totalSteps={data.interactions.length}
             answered={Boolean(submittedByInteraction[currentInteraction.id])}
+            streak={streak}
+            nextMilestone={nextMilestone}
             canGoBack={currentIndex > 0}
             canGoNext={currentIndex < data.interactions.length - 1}
             onBack={() => {
@@ -239,6 +342,8 @@ function InteractionCard({
   step,
   totalSteps,
   answered,
+  streak,
+  nextMilestone,
   canGoBack,
   canGoNext,
   onBack,
@@ -251,6 +356,8 @@ function InteractionCard({
   step: number
   totalSteps: number
   answered: boolean
+  streak: number
+  nextMilestone: number | null
   canGoBack: boolean
   canGoNext: boolean
   onBack: () => void
@@ -290,10 +397,16 @@ function InteractionCard({
           <Badge variant="info">
             Prompt {step} of {totalSteps}
           </Badge>
-          {answered ? <Badge variant="success">Answered</Badge> : null}
+          <div className="achievement-row">
+            {answered ? <Badge variant="success">Answered</Badge> : null}
+            {streak > 1 ? <Badge variant="warning">Streak x{streak}</Badge> : null}
+          </div>
         </div>
         <span className="eyebrow">{interaction.type === 'question' ? 'Ask anonymously' : 'Share feedback'}</span>
         <h2>{interaction.prompt}</h2>
+        <p className="prompt-helper">
+          {nextMilestone ? `Answer this to get closer to the ${nextMilestone}-contribution unlock.` : 'You have already unlocked every session milestone.'}
+        </p>
         <form onSubmit={submitText}>
           <Textarea value={value} onChange={(event) => onChange(event.target.value)} rows={4} maxLength={400} />
           <Button type="submit">Submit {interaction.type}</Button>
@@ -311,10 +424,16 @@ function InteractionCard({
           <Badge variant="info">
             Prompt {step} of {totalSteps}
           </Badge>
-          {answered ? <Badge variant="success">Answered</Badge> : null}
+          <div className="achievement-row">
+            {answered ? <Badge variant="success">Answered</Badge> : null}
+            {streak > 1 ? <Badge variant="warning">Streak x{streak}</Badge> : null}
+          </div>
         </div>
         <span className="eyebrow">Rate the session</span>
         <h2>{interaction.prompt}</h2>
+        <p className="prompt-helper">
+          {nextMilestone ? `Quick ratings help unlock the ${nextMilestone}-contribution milestone.` : 'Every session milestone is already unlocked.'}
+        </p>
         <div className="choice-grid">
           {Array.from({ length: scale }, (_, index) => index + 1).map((item) => (
             <Button key={item} type="button" variant="secondary" className="choice-pill" onClick={() => onSubmit({ value: item })}>
@@ -345,10 +464,16 @@ function InteractionCard({
           <Badge variant="info">
             Prompt {step} of {totalSteps}
           </Badge>
-          {answered ? <Badge variant="success">Answered</Badge> : null}
+          <div className="achievement-row">
+            {answered ? <Badge variant="success">Answered</Badge> : null}
+            {streak > 1 ? <Badge variant="warning">Streak x{streak}</Badge> : null}
+          </div>
         </div>
         <span className="eyebrow">Live poll</span>
         <h2>{interaction.prompt}</h2>
+        <p className="prompt-helper">
+          {nextMilestone ? `Cast your vote to move toward the ${nextMilestone}-contribution unlock.` : 'Your milestone track is already complete.'}
+        </p>
         <div className="choice-grid">
           {interaction.options.map((option) => (
             <Button
@@ -383,10 +508,16 @@ function InteractionCard({
         <Badge variant="info">
           Prompt {step} of {totalSteps}
         </Badge>
-        {answered ? <Badge variant="success">Answered</Badge> : null}
+        <div className="achievement-row">
+          {answered ? <Badge variant="success">Answered</Badge> : null}
+          {streak > 1 ? <Badge variant="warning">Streak x{streak}</Badge> : null}
+        </div>
       </div>
       <span className="eyebrow">React live</span>
       <h2>{interaction.prompt}</h2>
+      <p className="prompt-helper">
+        {nextMilestone ? `Fire a reaction to push toward the ${nextMilestone}-contribution unlock.` : 'You have already cleared the milestone track.'}
+      </p>
       <div className="reaction-grid">
         {interaction.options.map((option) => (
           <Button key={option} type="button" variant="secondary" className="reaction-button" onClick={() => onSubmit({ value: option })}>

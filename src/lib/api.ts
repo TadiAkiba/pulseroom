@@ -5,6 +5,16 @@ type FetchOptions = RequestInit & {
   json?: unknown
 }
 
+const apiBaseUrl = import.meta.env.VITE_API_URL?.trim().replace(/\/$/, '') || ''
+
+function toUrl(path: string) {
+  if (!apiBaseUrl) {
+    return path
+  }
+
+  return `${apiBaseUrl}${path}`
+}
+
 async function request<T>(path: string, options: FetchOptions = {}): Promise<T> {
   const { json, headers, ...rest } = options
   const hasJsonBody = json !== undefined
@@ -15,7 +25,7 @@ async function request<T>(path: string, options: FetchOptions = {}): Promise<T> 
       }
     : headers
 
-  const response = await fetch(path, {
+  const response = await fetch(toUrl(path), {
     ...rest,
     credentials: 'include',
     headers: requestHeaders,

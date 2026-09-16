@@ -1,4 +1,6 @@
+import 'dotenv/config'
 import cookieParser from 'cookie-parser'
+import cors from 'cors'
 import express from 'express'
 import fs from 'node:fs'
 import path from 'node:path'
@@ -44,6 +46,7 @@ type OrganizerRequest = express.Request & {
 
 const rateLimitWindowMs = 2000
 const lastSubmissionByKey = new Map<string, number>()
+let convexSyncWarned = false
 
 initializeDatabase()
 bootstrapOrganizer()
@@ -56,7 +59,7 @@ const app = express()
 const server = http.createServer(app)
 const io = new Server(server, {
   cors: {
-    origin: true,
+    origin: config.allowedOrigins.length > 0 ? config.allowedOrigins : true,
     credentials: true,
   },
 })
@@ -67,6 +70,12 @@ if (config.isProduction) {
 
 app.use(express.json({ limit: '1mb' }))
 app.use(cookieParser())
+app.use(
+  cors({
+    origin: config.allowedOrigins.length > 0 ? config.allowedOrigins : true,
+    credentials: true,
+  }),
+)
 
 const eventSchema = z.object({
   name: z.string().min(3),
@@ -154,8 +163,8 @@ function getOrganizerFromRequest(req: express.Request) {
 function setSessionCookie(res: express.Response, sessionId: string) {
   res.cookie('organizer_session', sessionId, {
     httpOnly: true,
-    sameSite: 'lax',
-    secure: config.isProduction,
+    sameSite: config.usesCrossSiteCookies ? 'none' : 'lax',
+    secure: config.isProduction || config.usesCrossSiteCookies,
     maxAge: config.sessionTtlHours * 60 * 60 * 1000,
   })
 }
@@ -163,8 +172,8 @@ function setSessionCookie(res: express.Response, sessionId: string) {
 function clearSessionCookie(res: express.Response) {
   res.clearCookie('organizer_session', {
     httpOnly: true,
-    sameSite: 'lax',
-    secure: config.isProduction,
+    sameSite: config.usesCrossSiteCookies ? 'none' : 'lax',
+    secure: config.isProduction || config.usesCrossSiteCookies,
   })
 }
 
@@ -391,6 +400,48 @@ function buildEventSnapshot(eventId: string, includeHidden: boolean) {
   }
 }
 
+async function syncEventToConvex(
+  adminSnapshot: NonNullable<ReturnType<typeof buildEventSnapshot>>,
+  publicSnapshot: NonNullable<ReturnType<typeof buildEventSnapshot>>,
+) {
+  if (!config.enableConvexPublicSync || !config.convexHttpActionsUrl) {
+    return
+  }
+
+  const endpoint = new URL('/sync-snapshot', config.convexHttpActionsUrl.endsWith('/') ? config.convexHttpActionsUrl : `${config.convexHttpActionsUrl}/`)
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  }
+
+  if (config.convexSyncSecret) {
+    headers['x-pulseroom-sync-secret'] = config.convexSyncSecret
+  }
+
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        eventId: adminSnapshot.event.id,
+        code: adminSnapshot.event.code,
+        adminSnapshot,
+        publicSnapshot,
+        updatedAt: new Date().toISOString(),
+      }),
+    })
+
+    if (!response.ok) {
+      throw new Error(`Convex sync returned ${response.status}.`)
+    }
+  } catch (error) {
+    if (!convexSyncWarned) {
+      const message = error instanceof Error ? error.message : 'Unknown sync failure.'
+      console.warn(`Convex sync is enabled but could not push snapshots: ${message}`)
+      convexSyncWarned = true
+    }
+  }
+}
+
 async function broadcastEvent(eventId: string) {
   const admin = buildEventSnapshot(eventId, true)
   const publicView = buildEventSnapshot(eventId, false)
@@ -400,6 +451,7 @@ async function broadcastEvent(eventId: string) {
 
   io.to(`event:${eventId}:admin`).emit('event:update-admin', admin)
   io.to(`event:${eventId}:public`).emit('event:update-public', publicView)
+  void syncEventToConvex(admin, publicView)
 }
 
 function queueAnalysis(eventId: string, responseId: string, text: string) {
@@ -442,11 +494,22 @@ function seedMissingAnalyses() {
 
 seedMissingAnalyses()
 
+if (config.enableConvexPublicSync) {
+  for (const event of listEvents()) {
+    void broadcastEvent(event.id)
+  }
+}
+
 app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
     mode: config.nodeEnv,
     analysisProvider: config.analysisProvider,
+    convex: {
+      enabled: config.enableConvexPublicSync,
+      urlConfigured: Boolean(config.convexUrl),
+      httpActionsConfigured: Boolean(config.convexHttpActionsUrl),
+    },
   })
 })
 
@@ -873,7 +936,7 @@ io.on('connection', (socket) => {
 const distPath = path.resolve(process.cwd(), 'dist')
 if (config.isProduction && fs.existsSync(distPath)) {
   app.use(express.static(distPath))
-  app.get('*', (req, res, next) => {
+  app.use((req, res, next) => {
     if (req.path.startsWith('/api')) {
       next()
       return

@@ -99,6 +99,10 @@ export type EventSnapshot = {
     timeLabel: string
     moderationState: ModerationState
     highlighted: boolean
+    votes: {
+      up: number
+      score: number
+    }
   }>
   presenterQuestions: Array<{
     id: string
@@ -109,14 +113,27 @@ export type EventSnapshot = {
     timeLabel: string
     moderationState: ModerationState
     highlighted: boolean
+    votes: {
+      up: number
+      score: number
+    }
   }>
   ideaFeed: IdeaFeedItem[]
   teamLeaderboard: TeamLeaderboardEntry[]
+  activePoll: {
+    id: string
+    prompt: string
+    totalVotes: number
+    allowMultiple: boolean
+    options: Array<{ label: string; value: number }>
+    active: boolean
+  } | null
   pollResults: Array<{
     id: string
     prompt: string
     totalVotes: number
     allowMultiple: boolean
+    active: boolean
     options: Array<{ label: string; value: number }>
   }>
   ratingResults: Array<{

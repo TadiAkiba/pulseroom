@@ -83,6 +83,7 @@ const eventSchema = z.object({
   name: z.string().min(3),
   description: z.string().max(280).optional(),
   status: z.enum(['active', 'inactive']).optional(),
+  config: z.record(z.string(), z.unknown()).optional(),
 })
 
 const interactionSchema = z.object({
@@ -138,6 +139,10 @@ function getAttendeeMeta(content: Record<string, unknown>) {
     nickname,
     team,
   }
+}
+
+function getActivePollInteractionId(event: { config: Record<string, unknown> }) {
+  return typeof event.config.activePollInteractionId === 'string' ? event.config.activePollInteractionId : null
 }
 
 function bootstrapOrganizer() {
@@ -480,6 +485,20 @@ function createDefaultInteractions(eventId: string) {
       },
       ordering: 14,
     }),
+    createInteraction({
+      eventId,
+      type: 'question',
+      prompt: 'What question would you like us to answer about AI?',
+      settings: {
+        formKey: 'qa',
+        formTitle: 'Ask the Room',
+        formDescription: 'Ask anonymously and let the room upvote the questions they want answered live.',
+        questionNumber: 1,
+        questionCount: 1,
+        points: 4,
+      },
+      ordering: 15,
+    }),
   ]
 }
 
@@ -549,16 +568,29 @@ function buildEventSnapshot(eventId: string, includeHidden: boolean) {
 
   const questionStream = responsesForView
     .filter((response) => response.responseType === 'question')
-    .map((response) => ({
-      id: response.id,
-      interactionId: response.interactionId,
-      interactionPrompt: interactionById.get(response.interactionId)?.prompt ?? 'Question',
-      text: String(response.content.text ?? ''),
-      createdAt: response.createdAt,
-      timeLabel: formatTime(response.createdAt),
-      moderationState: response.moderationState,
-      highlighted: response.highlighted,
-    }))
+    .map((response) => {
+      const voteSummary = voteSummaryByResponseId.get(response.id) ?? { up: 0, down: 0, score: 0 }
+      return {
+        id: response.id,
+        interactionId: response.interactionId,
+        interactionPrompt: interactionById.get(response.interactionId)?.prompt ?? 'Question',
+        text: String(response.content.text ?? ''),
+        createdAt: response.createdAt,
+        timeLabel: formatTime(response.createdAt),
+        moderationState: response.moderationState,
+        highlighted: response.highlighted,
+        votes: {
+          up: voteSummary.up,
+          score: voteSummary.score,
+        },
+      }
+    })
+    .sort(
+      (left, right) =>
+        Number(right.highlighted) - Number(left.highlighted) ||
+        right.votes.score - left.votes.score ||
+        right.createdAt.localeCompare(left.createdAt),
+    )
 
   const ideaFeed = responsesForView
     .filter((response) => {
@@ -643,6 +675,9 @@ function buildEventSnapshot(eventId: string, includeHidden: boolean) {
 
     if (response.responseType === 'question') {
       team.questions += 1
+      const voteSummary = voteSummaryByResponseId.get(response.id) ?? { up: 0, down: 0, score: 0 }
+      team.votesReceived += voteSummary.up
+      team.points += voteSummary.up
     }
 
     teamSummary.set(team.team, team)
@@ -660,6 +695,7 @@ function buildEventSnapshot(eventId: string, includeHidden: boolean) {
     }))
     .sort((left, right) => right.points - left.points || right.contributions - left.contributions || left.team.localeCompare(right.team))
 
+  const activePollInteractionId = getActivePollInteractionId(event)
   const pollResults = interactions
     .filter((interaction) => interaction.type === 'poll')
     .map((interaction) => {
@@ -677,12 +713,14 @@ function buildEventSnapshot(eventId: string, includeHidden: boolean) {
         prompt: interaction.prompt,
         totalVotes: relevant.length,
         allowMultiple: Boolean(interaction.settings.allowMultiple),
+        active: interaction.id === activePollInteractionId,
         options: interaction.options.map((option) => ({
           label: option,
           value: counts.get(option) ?? 0,
         })),
       }
     })
+  const activePoll = pollResults.find((poll) => poll.active) ?? null
 
   const ratingResults = interactions
     .filter((interaction) => interaction.type === 'rating')
@@ -748,6 +786,7 @@ function buildEventSnapshot(eventId: string, includeHidden: boolean) {
     presenterQuestions: questionStream.filter((question) => question.moderationState !== 'hidden').slice(0, 12),
     ideaFeed,
     teamLeaderboard,
+    activePoll,
     pollResults,
     ratingResults,
     reactionTotals: [...reactionTotals.entries()].map(([label, value]) => ({ label, value })),
@@ -1299,6 +1338,43 @@ app.post('/api/events/code/:code/responses/:responseId/vote', (req, res) => {
     responseId: response.id,
     voterKey: attendee.attendeeKey,
     direction: parsedVote.data.direction,
+  })
+
+  void broadcastEvent(event.id)
+  res.json({ ok: true })
+})
+
+app.post('/api/events/code/:code/questions/:responseId/upvote', (req, res) => {
+  const event = getEventByCode(String(req.params.code))
+  if (!event || event.status !== 'active') {
+    res.status(404).json({ error: 'Event not found or inactive.' })
+    return
+  }
+
+  const response = getResponse(String(req.params.responseId))
+  if (!response || response.eventId !== event.id || response.responseType !== 'question') {
+    res.status(404).json({ error: 'Question not found.' })
+    return
+  }
+
+  const parsedAttendee = attendeeProfileSchema.safeParse(req.body?.attendee)
+  if (!parsedAttendee.success) {
+    res.status(400).json({ error: 'A valid attendee profile is required.' })
+    return
+  }
+
+  const attendee = normalizeProfile(parsedAttendee.data)
+  const author = getAttendeeMeta(response.content)
+  if (author.attendeeKey && author.attendeeKey === attendee.attendeeKey) {
+    res.status(400).json({ error: 'You cannot upvote your own question.' })
+    return
+  }
+
+  upsertResponseVote({
+    eventId: event.id,
+    responseId: response.id,
+    voterKey: attendee.attendeeKey,
+    direction: 'up',
   })
 
   void broadcastEvent(event.id)

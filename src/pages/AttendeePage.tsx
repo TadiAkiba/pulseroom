@@ -9,6 +9,7 @@ import { Button } from '../components/ui/Button.tsx'
 import { Card } from '../components/ui/Card.tsx'
 import { Field, Input, Select, Textarea } from '../components/ui/Field.tsx'
 import { Progress } from '../components/ui/Progress.tsx'
+import { Tabs, TabsList, TabsTrigger } from '../components/ui/Tabs.tsx'
 import { api } from '../lib/api.ts'
 import { convexPublicSyncEnabled, convexQueries } from '../lib/convex.ts'
 import { socketUrl } from '../lib/realtime.ts'
@@ -133,6 +134,7 @@ export function AttendeePage() {
   const [progressByCode, setProgressByCode] = useState<Record<string, number>>({})
   const [streak, setStreak] = useState(0)
   const [currentIndex, setCurrentIndex] = useState(0)
+  const [activePanel, setActivePanel] = useState<'townhall' | 'qa'>('townhall')
   const [profile, setProfile] = useState<AnonymousAttendeeProfile | null>(initialProfile)
   const [draftProfile, setDraftProfile] = useState({
     nickname: initialProfile?.nickname ?? generateNickname(),
@@ -141,6 +143,18 @@ export function AttendeePage() {
   const liveSnapshot = (convexSnapshot as EventSnapshot | null | undefined) ?? snapshot
   const progress = progressByCode[code] ?? getStoredProgress(code)
   const teams = useMemo(() => getEventTeams(liveSnapshot), [liveSnapshot])
+  const townhallInteractions = useMemo(
+    () => data?.interactions.filter((interaction) => getInteractionFormKey(interaction) !== 'qa') ?? [],
+    [data],
+  )
+  const qaInteraction = useMemo(
+    () => data?.interactions.find((interaction) => getInteractionFormKey(interaction) === 'qa') ?? null,
+    [data],
+  )
+  const activePollInteraction = useMemo(
+    () => data?.interactions.find((interaction) => interaction.id === liveSnapshot?.activePoll?.id) ?? null,
+    [data, liveSnapshot?.activePoll?.id],
+  )
 
   useEffect(() => {
     let socket: Socket | undefined
@@ -199,15 +213,15 @@ export function AttendeePage() {
       setStoredProgress(code, nextProgress)
       setStreak((current) => current + 1)
       if (data) {
-        const currentInteractionIndex = data.interactions.findIndex((item) => item.id === interaction.id)
+        const currentInteractionIndex = townhallInteractions.findIndex((item) => item.id === interaction.id)
         if (currentInteractionIndex >= 0) {
-          const nextUnansweredIndex = data.interactions.findIndex(
+          const nextUnansweredIndex = townhallInteractions.findIndex(
             (item, index) => index > currentInteractionIndex && !submittedByInteraction[item.id] && item.id !== interaction.id,
           )
           if (nextUnansweredIndex >= 0) {
             setCurrentIndex(nextUnansweredIndex)
           } else {
-            setCurrentIndex(Math.min(currentInteractionIndex + 1, data.interactions.length - 1))
+            setCurrentIndex(Math.min(currentInteractionIndex + 1, townhallInteractions.length - 1))
           }
         }
       }
@@ -255,17 +269,31 @@ export function AttendeePage() {
     setError('')
   }
 
+  async function upvoteQuestion(responseId: string) {
+    if (!profile) {
+      setError('Pick your anonymous nickname and team before voting.')
+      return
+    }
+
+    setError('')
+    try {
+      await api.upvoteQuestion(code, responseId, { attendee: profile })
+    } catch (voteError) {
+      setError(voteError instanceof Error ? voteError.message : 'Unable to record your vote.')
+    }
+  }
+
   const completion = useMemo(() => {
-    if (!data) {
+    if (!townhallInteractions.length) {
       return 0
     }
-    return Math.min(100, Math.round((progress / Math.max(data.interactions.length, 1)) * 100))
-  }, [data, progress])
+    return Math.min(100, Math.round((progress / Math.max(townhallInteractions.length, 1)) * 100))
+  }, [progress, townhallInteractions.length])
 
-  const currentInteraction = data?.interactions[currentIndex] ?? null
+  const currentInteraction = townhallInteractions[currentIndex] ?? null
   const answeredCount = useMemo(
-    () => Object.values(submittedByInteraction).filter(Boolean).length,
-    [submittedByInteraction],
+    () => townhallInteractions.filter((interaction) => submittedByInteraction[interaction.id]).length,
+    [submittedByInteraction, townhallInteractions],
   )
   const level = useMemo(() => getLevel(progress), [progress])
   const nextMilestone = useMemo(
@@ -444,11 +472,32 @@ export function AttendeePage() {
         {error ? <Alert variant="danger">{error}</Alert> : null}
       </Card>
 
+      {profile && liveSnapshot.activePoll && activePollInteraction ? (
+        <ActivePollCard
+          poll={liveSnapshot.activePoll}
+          interaction={activePollInteraction}
+          onSubmit={(payload) => submit(activePollInteraction, payload)}
+        />
+      ) : null}
+
       {profile ? (
         <>
+          <Tabs className="attendee-section-tabs">
+            <TabsList>
+              <TabsTrigger active={activePanel === 'townhall'} onClick={() => setActivePanel('townhall')}>
+                Townhall
+              </TabsTrigger>
+              <TabsTrigger active={activePanel === 'qa'} onClick={() => setActivePanel('qa')}>
+                Ask the Room
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+
+          {activePanel === 'townhall' ? (
+            <>
           <section className="townhall-actions">
             {quickActions.map((action) => {
-              const matchingInteractions = data.interactions
+              const matchingInteractions = townhallInteractions
                 .map((interaction, index) => ({ interaction, index }))
                 .filter(({ interaction }) => getInteractionFormKey(interaction) === action.key)
               const nextUnanswered = matchingInteractions.find(({ interaction }) => !submittedByInteraction[interaction.id])
@@ -485,12 +534,12 @@ export function AttendeePage() {
                     key={currentInteraction.id}
                     interaction={currentInteraction}
                     step={currentIndex + 1}
-                    totalSteps={data.interactions.length}
+                    totalSteps={townhallInteractions.length}
                     answered={Boolean(submittedByInteraction[currentInteraction.id])}
                     streak={streak}
                     nextMilestone={nextMilestone}
                     canGoBack={currentIndex > 0}
-                    canGoNext={currentIndex < data.interactions.length - 1}
+                    canGoNext={currentIndex < townhallInteractions.length - 1}
                     onBack={() => {
                       setStatus('')
                       setError('')
@@ -517,11 +566,11 @@ export function AttendeePage() {
                 <div>
                   <span className="eyebrow">Townhall flow</span>
                   <h2>
-                    {answeredCount} of {data.interactions.length} prompts answered
+                    {answeredCount} of {townhallInteractions.length} prompts answered
                   </h2>
                 </div>
                 <div className="prompt-dots" aria-label="Interaction progress">
-                  {data.interactions.map((interaction, index) => (
+                  {townhallInteractions.map((interaction, index) => (
                     <button
                       key={interaction.id}
                       type="button"
@@ -592,9 +641,155 @@ export function AttendeePage() {
               </Card>
             </div>
           </section>
+            </>
+          ) : null}
+
+          {activePanel === 'qa' && qaInteraction ? (
+            <section className="townhall-grid">
+              <div className="townhall-grid__main">
+                <QuestionComposer
+                  interaction={qaInteraction}
+                  value={submissions[qaInteraction.id] ?? ''}
+                  onChange={(value) =>
+                    setSubmissions((current) => ({
+                      ...current,
+                      [qaInteraction.id]: value,
+                    }))
+                  }
+                  onSubmit={(payload) => submit(qaInteraction, payload)}
+                  answered={Boolean(submittedByInteraction[qaInteraction.id])}
+                />
+              </div>
+
+              <div className="townhall-grid__side">
+                <Card className="townhall-card">
+                  <span className="eyebrow">Top Q&A</span>
+                  <h3>Questions the room wants answered</h3>
+                  <div className="question-board">
+                    {liveSnapshot.questionStream.map((question) => (
+                      <article key={question.id} className="question-board__item">
+                        <div>
+                          <strong>{question.text}</strong>
+                          <p className="muted">{question.timeLabel}</p>
+                        </div>
+                        <div className="question-board__actions">
+                          <Badge variant={question.highlighted ? 'warning' : 'outline'}>▲ {question.votes.up}</Badge>
+                          <Button type="button" size="sm" variant="outline" onClick={() => upvoteQuestion(question.id)}>
+                            Upvote
+                          </Button>
+                        </div>
+                      </article>
+                    ))}
+                    {liveSnapshot.questionStream.length === 0 ? (
+                      <p className="muted">Questions will appear here once the room starts asking.</p>
+                    ) : null}
+                  </div>
+                </Card>
+              </div>
+            </section>
+          ) : null}
         </>
       ) : null}
     </main>
+  )
+}
+
+function ActivePollCard({
+  poll,
+  interaction,
+  onSubmit,
+}: {
+  poll: NonNullable<EventSnapshot['activePoll']>
+  interaction: InteractionRecord
+  onSubmit: (payload: Record<string, unknown>) => void
+}) {
+  const [selected, setSelected] = useState<string[]>([])
+
+  function toggleOption(option: string) {
+    setSelected((current) => {
+      if (poll.allowMultiple) {
+        return current.includes(option) ? current.filter((item) => item !== option) : [...current, option]
+      }
+      return [option]
+    })
+  }
+
+  return (
+    <Card className="townhall-card active-poll-card">
+      <div className="stack-list">
+        <div>
+          <span className="eyebrow">Live Poll</span>
+          <h2>{poll.prompt}</h2>
+          <p className="muted">Launched by the facilitator. Results update instantly on the public dashboard.</p>
+        </div>
+        <Badge variant="success">{poll.totalVotes} votes</Badge>
+      </div>
+      <div className="choice-grid">
+        {interaction.options.map((option) => (
+          <Button
+            key={option}
+            type="button"
+            variant={selected.includes(option) ? 'default' : 'secondary'}
+            className={`choice-pill ${selected.includes(option) ? 'selected' : ''}`}
+            onClick={() => toggleOption(option)}
+          >
+            {option}
+          </Button>
+        ))}
+      </div>
+      <Button
+        type="button"
+        disabled={selected.length === 0}
+        onClick={() => {
+          onSubmit({ selections: selected })
+          setSelected([])
+        }}
+      >
+        Submit live poll vote
+      </Button>
+    </Card>
+  )
+}
+
+function QuestionComposer({
+  interaction,
+  value,
+  onChange,
+  onSubmit,
+  answered,
+}: {
+  interaction: InteractionRecord
+  value: string
+  onChange: (value: string) => void
+  onSubmit: (payload: Record<string, unknown>) => void
+  answered: boolean
+}) {
+  const formDescription = typeof interaction.settings.formDescription === 'string' ? interaction.settings.formDescription : ''
+
+  function submitQuestion(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!value.trim()) {
+      return
+    }
+    onSubmit({ text: value.trim() })
+    onChange('')
+  }
+
+  return (
+    <Card className="interaction-card interaction-card--modal">
+      <div className="prompt-meta">
+        <Badge variant="info">Separate Q&amp;A</Badge>
+        <div className="achievement-row">{answered ? <Badge variant="success">Asked</Badge> : null}</div>
+      </div>
+      <span className="eyebrow">Ask the Room</span>
+      <h2>{interaction.prompt}</h2>
+      {formDescription ? <p className="muted">{formDescription}</p> : null}
+      <p className="prompt-helper">Ask anonymously. The room can upvote the questions they most want answered live.</p>
+      <form onSubmit={submitQuestion}>
+        <Textarea value={value} onChange={(event) => onChange(event.target.value)} rows={4} maxLength={400} />
+        <Button type="submit">Ask anonymously</Button>
+      </form>
+    </Card>
   )
 }
 

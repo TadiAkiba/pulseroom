@@ -96,6 +96,29 @@ export function EventDashboardPage() {
     }
   }
 
+  async function setActivePoll(interactionId: string | null) {
+    if (!snapshot) {
+      return
+    }
+
+    setSaving(true)
+    try {
+      setError('')
+      setNotice('')
+      await api.updateEvent(snapshot.event.id, {
+        config: {
+          ...snapshot.event.config,
+          activePollInteractionId: interactionId,
+        },
+      })
+      setNotice(interactionId ? 'Live poll launched on the public dashboard.' : 'Live poll cleared.')
+    } catch (updateError) {
+      setError(updateError instanceof Error ? updateError.message : 'Unable to update live poll.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   async function createInteraction(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!snapshot) {
@@ -272,18 +295,23 @@ export function EventDashboardPage() {
       <section className="dashboard-three-col">
         <Card>
           <CardHeader className="panel-heading">
-            <CardTitle>Live question stream</CardTitle>
-            <CardDescription>Moderator controls apply to presenter mode immediately.</CardDescription>
+            <CardTitle>Ask the Room</CardTitle>
+            <CardDescription>Questions and votes update live as the room responds.</CardDescription>
           </CardHeader>
+          <div className="question-table question-table--header">
+            <span>Question</span>
+            <span>Votes</span>
+          </div>
           <div className="question-list">
             {snapshot.questionStream.map((question) => (
               <div key={question.id} className={`question-item ${question.highlighted ? 'highlighted' : ''}`}>
-                <div>
+                <div className="question-item__body">
                   <strong>{question.text}</strong>
                   <p>
                     {question.timeLabel} • {question.moderationState}
                   </p>
                 </div>
+                <div className="question-vote-pill">▲ {question.votes.up}</div>
                 <div className="question-actions">
                   <Button type="button" size="sm" variant="secondary" onClick={() => moderate(question.id, 'visible', question.highlighted)}>
                     Show
@@ -399,11 +427,28 @@ export function EventDashboardPage() {
         <Card className="chart-panel">
           <CardHeader className="panel-heading">
             <CardTitle>Poll results</CardTitle>
-            <CardDescription>Live vote totals update as attendees submit.</CardDescription>
+            <CardDescription>Launch a poll from here and its results will appear instantly on attendee and presenter screens.</CardDescription>
           </CardHeader>
           {snapshot.pollResults.map((poll) => (
             <div key={poll.id} className="poll-block">
-              <strong>{poll.prompt}</strong>
+              <div className="poll-block__header">
+                <div>
+                  <strong>{poll.prompt}</strong>
+                  <p>{poll.totalVotes} responses</p>
+                </div>
+                <div className="achievement-row">
+                  {poll.active ? <Badge variant="success">Live now</Badge> : null}
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={poll.active ? 'outline' : 'secondary'}
+                    disabled={saving}
+                    onClick={() => setActivePoll(poll.active ? null : poll.id)}
+                  >
+                    {poll.active ? 'Clear poll' : 'Launch poll'}
+                  </Button>
+                </div>
+              </div>
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={poll.options}>
                   <CartesianGrid stroke="#243147" strokeDasharray="3 3" />

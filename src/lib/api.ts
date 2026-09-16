@@ -53,7 +53,10 @@ export const api = {
   createEvent: (payload: { name: string; description?: string; status?: 'active' | 'inactive' }) =>
     request<{ event: EventSnapshot['event'] }>('/api/admin/events', { method: 'POST', json: payload }),
   getAdminEvent: (eventId: string) => request<EventSnapshot>(`/api/admin/events/${eventId}`),
-  updateEvent: (eventId: string, payload: { name?: string; description?: string; status?: 'active' | 'inactive' }) =>
+  updateEvent: (
+    eventId: string,
+    payload: { name?: string; description?: string; status?: 'active' | 'inactive'; config?: Record<string, unknown> },
+  ) =>
     request<{ event: EventSnapshot['event'] }>(`/api/admin/events/${eventId}`, { method: 'PUT', json: payload }),
   createInteraction: (eventId: string, payload: Partial<InteractionRecord> & { type: InteractionRecord['type']; prompt: string }) =>
     request<{ interaction: InteractionRecord }>(`/api/admin/events/${eventId}/interactions`, { method: 'POST', json: payload }),
@@ -74,4 +77,6 @@ export const api = {
     request<{ responseId: string; message: string }>(`/api/events/code/${code}/responses`, { method: 'POST', json: payload }),
   voteIdea: (code: string, responseId: string, payload: { direction: 'up' | 'down'; attendee: AnonymousAttendeeProfile }) =>
     request<{ ok: boolean }>(`/api/events/code/${code}/responses/${responseId}/vote`, { method: 'POST', json: payload }),
+  upvoteQuestion: (code: string, responseId: string, payload: { attendee: AnonymousAttendeeProfile }) =>
+    request<{ ok: boolean }>(`/api/events/code/${code}/questions/${responseId}/upvote`, { method: 'POST', json: payload }),
 }

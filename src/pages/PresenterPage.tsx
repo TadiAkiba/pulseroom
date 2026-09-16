@@ -192,7 +192,9 @@ export function PresenterPage() {
           <div className="presenter-question-grid">
             {liveSnapshot.presenterQuestions.slice(0, 6).map((question) => (
               <article key={question.id} className={`presenter-card ${question.highlighted ? 'highlighted' : ''}`}>
-                <span>{question.timeLabel}</span>
+                <span>
+                  {question.timeLabel} • ▲ {question.votes.up}
+                </span>
                 <strong>{question.text}</strong>
               </article>
             ))}
@@ -269,10 +271,12 @@ export function PresenterPage() {
 
         {view === 'polls' ? (
           <div className="presenter-chart">
-            <h2>Live poll results</h2>
-            {liveSnapshot.pollResults[0] ? (
+            <h2>{liveSnapshot.activePoll ? 'Live poll results' : 'Facilitator poll queue'}</h2>
+            {liveSnapshot.activePoll ? (
+              <>
+                <p className="presenter-support-copy">{liveSnapshot.activePoll.prompt}</p>
               <ResponsiveContainer width="100%" height={420}>
-                <BarChart data={liveSnapshot.pollResults[0].options}>
+                  <BarChart data={liveSnapshot.activePoll.options}>
                   <CartesianGrid stroke="#263449" strokeDasharray="3 3" />
                   <XAxis dataKey="label" stroke="#e2e8f0" interval={0} angle={-6} height={60} textAnchor="end" />
                   <YAxis stroke="#e2e8f0" allowDecimals={false} />
@@ -280,6 +284,17 @@ export function PresenterPage() {
                   <Bar dataKey="value" fill="#38bdf8" radius={[14, 14, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
+              </>
+            ) : liveSnapshot.pollResults[0] ? (
+              <div className="presenter-insights">
+                {liveSnapshot.pollResults.slice(0, 6).map((poll) => (
+                  <article key={poll.id} className="presenter-card">
+                    <span>{poll.active ? 'Live now' : 'Ready to launch'}</span>
+                    <strong>{poll.prompt}</strong>
+                    <p>{poll.totalVotes} responses so far</p>
+                  </article>
+                ))}
+              </div>
             ) : (
               <div className="presenter-center">No polls configured yet.</div>
             )}

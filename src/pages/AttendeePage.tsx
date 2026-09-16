@@ -2,10 +2,17 @@ import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useParams } from 'react-router-dom'
 import { io, type Socket } from 'socket.io-client'
+import { Alert } from '../components/ui/Alert.tsx'
+import { Badge } from '../components/ui/Badge.tsx'
+import { Button } from '../components/ui/Button.tsx'
+import { Card } from '../components/ui/Card.tsx'
+import { Progress } from '../components/ui/Progress.tsx'
+import { Textarea } from '../components/ui/Field.tsx'
 import { api } from '../lib/api.ts'
 import type { EventPageData, EventSnapshot, InteractionRecord } from '../types.ts'
 
 type SubmissionState = Record<string, string>
+type SubmittedState = Record<string, boolean>
 
 function getStoredProgress(code: string) {
   const key = `pulse-room-progress:${code}`
@@ -22,11 +29,14 @@ export function AttendeePage() {
   const [data, setData] = useState<EventPageData | null>(null)
   const [snapshot, setSnapshot] = useState<EventSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
   const [error, setError] = useState('')
   const [status, setStatus] = useState('')
   const [submissions, setSubmissions] = useState<SubmissionState>({})
+  const [submittedByInteraction, setSubmittedByInteraction] = useState<SubmittedState>({})
   const [progressByCode, setProgressByCode] = useState<Record<string, number>>({})
   const [streak, setStreak] = useState(0)
+  const [currentIndex, setCurrentIndex] = useState(0)
   const progress = progressByCode[code] ?? getStoredProgress(code)
 
   useEffect(() => {
@@ -37,18 +47,19 @@ export function AttendeePage() {
       .then((response) => {
         setData(response)
         setSnapshot(response.snapshot)
+        setCurrentIndex(0)
         setLoading(false)
 
         socket = io({
           transports: ['websocket'],
         })
-        socket.emit('event:join', response.event.id)
-        socket.on('event:update', (payload: { publicView: EventSnapshot }) => {
-          setSnapshot(payload.publicView)
+        socket.emit('event:join-public', response.event.id)
+        socket.on('event:update-public', (nextSnapshot: EventSnapshot) => {
+          setSnapshot(nextSnapshot)
         })
       })
       .catch((pageError) => {
-        setError(pageError instanceof Error ? pageError.message : 'Unable to load event.')
+        setLoadError(pageError instanceof Error ? pageError.message : 'Unable to load event.')
         setLoading(false)
       })
 
@@ -67,10 +78,24 @@ export function AttendeePage() {
         ...payload,
       })
       setStatus(response.message)
+      setSubmittedByInteraction((current) => ({ ...current, [interaction.id]: true }))
       const nextProgress = progress + 1
       setProgressByCode((current) => ({ ...current, [code]: nextProgress }))
       setStoredProgress(code, nextProgress)
       setStreak((current) => current + 1)
+      if (data) {
+        const currentInteractionIndex = data.interactions.findIndex((item) => item.id === interaction.id)
+        if (currentInteractionIndex >= 0) {
+          const nextUnansweredIndex = data.interactions.findIndex(
+            (item, index) => index > currentInteractionIndex && !submittedByInteraction[item.id] && item.id !== interaction.id,
+          )
+          if (nextUnansweredIndex >= 0) {
+            setCurrentIndex(nextUnansweredIndex)
+          } else {
+            setCurrentIndex(Math.min(currentInteractionIndex + 1, data.interactions.length - 1))
+          }
+        }
+      }
     } catch (submissionError) {
       setError(submissionError instanceof Error ? submissionError.message : 'Unable to submit response.')
     }
@@ -83,24 +108,30 @@ export function AttendeePage() {
     return Math.min(100, Math.round((progress / Math.max(data.interactions.length, 1)) * 100))
   }, [data, progress])
 
+  const currentInteraction = data?.interactions[currentIndex] ?? null
+  const answeredCount = useMemo(
+    () => Object.values(submittedByInteraction).filter(Boolean).length,
+    [submittedByInteraction],
+  )
+
   if (loading) {
     return (
       <main className="page center-state">
-        <div className="panel">
+        <Card className="ui-state-card">
           <h1>Joining event...</h1>
           <p>Loading live interactions and the latest room activity.</p>
-        </div>
+        </Card>
       </main>
     )
   }
 
-  if (error || !data || !snapshot) {
+  if (loadError || !data || !snapshot) {
     return (
       <main className="page center-state">
-        <div className="panel">
+        <Card className="ui-state-card">
           <h1>We could not open this event.</h1>
-          <p>{error || 'The event may be inactive or the code may be incorrect.'}</p>
-        </div>
+          <p>{loadError || 'The event may be inactive or the code may be incorrect.'}</p>
+        </Card>
       </main>
     )
   }
@@ -116,16 +147,14 @@ export function AttendeePage() {
         <div className="progress-card">
           <span>Participation progress</span>
           <strong>{completion}%</strong>
-          <div className="progress-track">
-            <div className="progress-fill" style={{ width: `${completion}%` }} />
-          </div>
+          <Progress value={completion} />
           <p>
             {progress} contributions this session • streak {streak}
           </p>
         </div>
       </section>
 
-      <section className="panel attendee-panel">
+      <Card className="attendee-panel">
         <div className="stats-row">
           <div>
             <strong>{snapshot.metrics.totalResponses}</strong>
@@ -141,25 +170,65 @@ export function AttendeePage() {
           </div>
         </div>
         <p className="muted">{data.privacy.notice}</p>
-        {status ? <div className="flash success">{status}</div> : null}
-        {error ? <div className="flash error">{error}</div> : null}
-      </section>
+        {status ? <Alert variant="success">{status}</Alert> : null}
+        {error ? <Alert variant="danger">{error}</Alert> : null}
+      </Card>
 
-      <section className="interaction-stack">
-        {data.interactions.map((interaction) => (
+      <section className="prompt-stage">
+        <div className="prompt-stage__backdrop" aria-hidden="true" />
+        {currentInteraction ? (
           <InteractionCard
-            key={interaction.id}
-            interaction={interaction}
-            value={submissions[interaction.id] ?? ''}
+            key={currentInteraction.id}
+            interaction={currentInteraction}
+            step={currentIndex + 1}
+            totalSteps={data.interactions.length}
+            answered={Boolean(submittedByInteraction[currentInteraction.id])}
+            canGoBack={currentIndex > 0}
+            canGoNext={currentIndex < data.interactions.length - 1}
+            onBack={() => {
+              setStatus('')
+              setError('')
+              setCurrentIndex((current) => Math.max(0, current - 1))
+            }}
+            onNext={() => {
+              setStatus('')
+              setError('')
+              setCurrentIndex((current) => Math.min(data.interactions.length - 1, current + 1))
+            }}
+            value={submissions[currentInteraction.id] ?? ''}
             onChange={(value) =>
               setSubmissions((current) => ({
                 ...current,
-                [interaction.id]: value,
+                [currentInteraction.id]: value,
               }))
             }
-            onSubmit={(payload) => submit(interaction, payload)}
+            onSubmit={(payload) => submit(currentInteraction, payload)}
           />
-        ))}
+        ) : null}
+      </section>
+
+      <section className="prompt-queue">
+        <div>
+          <span className="eyebrow">Sequential flow</span>
+          <h2>
+            {answeredCount} of {data.interactions.length} prompts answered
+          </h2>
+        </div>
+        <div className="prompt-dots" aria-label="Interaction progress">
+          {data.interactions.map((interaction, index) => (
+            <button
+              key={interaction.id}
+              type="button"
+              className={`prompt-dot ${index === currentIndex ? 'active' : ''} ${submittedByInteraction[interaction.id] ? 'answered' : ''}`}
+              onClick={() => {
+                setStatus('')
+                setError('')
+                setCurrentIndex(index)
+              }}
+              aria-label={`Open prompt ${index + 1}`}
+            />
+          ))}
+        </div>
       </section>
     </main>
   )
@@ -167,16 +236,43 @@ export function AttendeePage() {
 
 function InteractionCard({
   interaction,
+  step,
+  totalSteps,
+  answered,
+  canGoBack,
+  canGoNext,
+  onBack,
+  onNext,
   value,
   onChange,
   onSubmit,
 }: {
   interaction: InteractionRecord
+  step: number
+  totalSteps: number
+  answered: boolean
+  canGoBack: boolean
+  canGoNext: boolean
+  onBack: () => void
+  onNext: () => void
   value: string
   onChange: (value: string) => void
   onSubmit: (payload: Record<string, unknown>) => void
 }) {
   const [selected, setSelected] = useState<string[]>([])
+
+  function renderNavigation() {
+    return (
+      <div className="prompt-actions">
+        <Button type="button" variant="outline" onClick={onBack} disabled={!canGoBack}>
+          Previous
+        </Button>
+        <Button type="button" variant="ghost" onClick={onNext} disabled={!canGoNext}>
+          Next prompt
+        </Button>
+      </div>
+    )
+  }
 
   function submitText(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -189,31 +285,45 @@ function InteractionCard({
 
   if (interaction.type === 'question' || interaction.type === 'feedback') {
     return (
-      <article className="panel interaction-card">
+      <Card className="interaction-card interaction-card--modal">
+        <div className="prompt-meta">
+          <Badge variant="info">
+            Prompt {step} of {totalSteps}
+          </Badge>
+          {answered ? <Badge variant="success">Answered</Badge> : null}
+        </div>
         <span className="eyebrow">{interaction.type === 'question' ? 'Ask anonymously' : 'Share feedback'}</span>
         <h2>{interaction.prompt}</h2>
         <form onSubmit={submitText}>
-          <textarea value={value} onChange={(event) => onChange(event.target.value)} rows={4} maxLength={400} />
-          <button type="submit">Submit {interaction.type}</button>
+          <Textarea value={value} onChange={(event) => onChange(event.target.value)} rows={4} maxLength={400} />
+          <Button type="submit">Submit {interaction.type}</Button>
         </form>
-      </article>
+        {renderNavigation()}
+      </Card>
     )
   }
 
   if (interaction.type === 'rating') {
     const scale = Number(interaction.settings.scale ?? 5)
     return (
-      <article className="panel interaction-card">
+      <Card className="interaction-card interaction-card--modal">
+        <div className="prompt-meta">
+          <Badge variant="info">
+            Prompt {step} of {totalSteps}
+          </Badge>
+          {answered ? <Badge variant="success">Answered</Badge> : null}
+        </div>
         <span className="eyebrow">Rate the session</span>
         <h2>{interaction.prompt}</h2>
         <div className="choice-grid">
           {Array.from({ length: scale }, (_, index) => index + 1).map((item) => (
-            <button key={item} type="button" className="choice-pill" onClick={() => onSubmit({ value: item })}>
+            <Button key={item} type="button" variant="secondary" className="choice-pill" onClick={() => onSubmit({ value: item })}>
               {item}
-            </button>
+            </Button>
           ))}
         </div>
-      </article>
+        {renderNavigation()}
+      </Card>
     )
   }
 
@@ -230,22 +340,29 @@ function InteractionCard({
     }
 
     return (
-      <article className="panel interaction-card">
+      <Card className="interaction-card interaction-card--modal">
+        <div className="prompt-meta">
+          <Badge variant="info">
+            Prompt {step} of {totalSteps}
+          </Badge>
+          {answered ? <Badge variant="success">Answered</Badge> : null}
+        </div>
         <span className="eyebrow">Live poll</span>
         <h2>{interaction.prompt}</h2>
         <div className="choice-grid">
           {interaction.options.map((option) => (
-            <button
+            <Button
               key={option}
               type="button"
+              variant={selected.includes(option) ? 'default' : 'secondary'}
               className={`choice-pill ${selected.includes(option) ? 'selected' : ''}`}
               onClick={() => toggleOption(option)}
             >
               {option}
-            </button>
+            </Button>
           ))}
         </div>
-        <button
+        <Button
           type="button"
           disabled={selected.length === 0}
           onClick={() => {
@@ -254,22 +371,30 @@ function InteractionCard({
           }}
         >
           Submit vote
-        </button>
-      </article>
+        </Button>
+        {renderNavigation()}
+      </Card>
     )
   }
 
   return (
-    <article className="panel interaction-card">
+    <Card className="interaction-card interaction-card--modal">
+      <div className="prompt-meta">
+        <Badge variant="info">
+          Prompt {step} of {totalSteps}
+        </Badge>
+        {answered ? <Badge variant="success">Answered</Badge> : null}
+      </div>
       <span className="eyebrow">React live</span>
       <h2>{interaction.prompt}</h2>
       <div className="reaction-grid">
         {interaction.options.map((option) => (
-          <button key={option} type="button" className="reaction-button" onClick={() => onSubmit({ value: option })}>
+          <Button key={option} type="button" variant="secondary" className="reaction-button" onClick={() => onSubmit({ value: option })}>
             {option}
-          </button>
+          </Button>
         ))}
       </div>
-    </article>
+      {renderNavigation()}
+    </Card>
   )
 }

@@ -106,3 +106,18 @@ export type EventSocketPayload = {
   admin: EventSnapshot
   publicView: EventSnapshot
 }
+
+export type OrganizerSummary = {
+  email: string
+}
+
+export type AuthSession = {
+  authenticated: boolean
+  organizer: OrganizerSummary | null
+  canRegister: boolean
+}
+
+export type DemoMeta = {
+  demoEnabled: boolean
+  demoCode: string | null
+}

@@ -1,5 +1,6 @@
 import { lazy, Suspense } from 'react'
 import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { Card, CardContent, CardDescription, CardTitle } from './components/ui/Card.tsx'
 
 const JoinPage = lazy(() => import('./pages/JoinPage.tsx').then((module) => ({ default: module.JoinPage })))
 const AttendeePage = lazy(() =>
@@ -43,10 +44,12 @@ export default function App() {
       <Suspense
         fallback={
           <main className="page center-state">
-            <div className="panel">
-              <h1>Loading experience...</h1>
-              <p>Pulling in the right live view for this route.</p>
-            </div>
+            <Card className="ui-state-card">
+              <CardContent>
+                <CardTitle>Loading experience...</CardTitle>
+                <CardDescription>Pulling in the right live view for this route.</CardDescription>
+              </CardContent>
+            </Card>
           </main>
         }
       >

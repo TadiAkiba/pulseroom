@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { Alert } from '../components/ui/Alert.tsx'
+import { Badge } from '../components/ui/Badge.tsx'
+import { Button } from '../components/ui/Button.tsx'
+import { buttonClasses } from '../components/ui/buttonClasses.ts'
+import { Field, Input } from '../components/ui/Field.tsx'
 import { api } from '../lib/api.ts'
 
 export function JoinPage() {
@@ -9,11 +14,13 @@ export function JoinPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [demoCode, setDemoCode] = useState('')
+  const [demoEnabled, setDemoEnabled] = useState(false)
 
   useEffect(() => {
     api
       .demo()
       .then((data) => {
+        setDemoEnabled(data.demoEnabled)
         if (data.demoCode) {
           setDemoCode(data.demoCode)
         }
@@ -41,28 +48,29 @@ export function JoinPage() {
     <main className="page attendee-home">
       <section className="hero-grid">
         <div className="hero-copy">
-          <span className="eyebrow">Anonymous live audience engagement</span>
+          <Badge variant="info">Anonymous live audience engagement</Badge>
           <h1>Turn live events into a real-time conversation.</h1>
           <p className="lede">
             Join with a code, ask questions anonymously, react in the moment, and watch the room’s sentiment evolve live.
           </p>
 
           <form className="join-form" onSubmit={handleSubmit}>
-            <label htmlFor="event-code">Enter event code</label>
-            <div className="join-row">
-              <input
-                id="event-code"
-                value={code}
-                onChange={(event) => setCode(event.target.value.toUpperCase())}
-                placeholder="ABC123"
-                maxLength={6}
-                autoComplete="off"
-              />
-              <button type="submit" disabled={loading}>
-                {loading ? 'Joining...' : 'Join event'}
-              </button>
-            </div>
-            {error ? <p className="inline-error">{error}</p> : null}
+            <Field label="Enter event code">
+              <div className="join-row">
+                <Input
+                  id="event-code"
+                  value={code}
+                  onChange={(event) => setCode(event.target.value.toUpperCase())}
+                  placeholder="ABC123"
+                  maxLength={6}
+                  autoComplete="off"
+                />
+                <Button type="submit" disabled={loading}>
+                  {loading ? 'Joining...' : 'Join event'}
+                </Button>
+              </div>
+            </Field>
+            {error ? <Alert variant="danger">{error}</Alert> : null}
           </form>
 
           <div className="privacy-card">
@@ -96,9 +104,9 @@ export function JoinPage() {
           <div className="floating-card">
             <span>Top themes</span>
             <div className="chip-row">
-              <span className="chip">Implementation</span>
-              <span className="chip">Pricing</span>
-              <span className="chip">Support</span>
+              <Badge variant="outline">Implementation</Badge>
+              <Badge variant="outline">Pricing</Badge>
+              <Badge variant="outline">Support</Badge>
             </div>
           </div>
         </div>
@@ -121,18 +129,22 @@ export function JoinPage() {
 
       <section className="demo-banner">
         <div>
-          <strong>Need a live demo?</strong>
-          <p>The seeded demo event includes realistic questions, feedback, ratings, polls, and reactions.</p>
+          <strong>{demoEnabled ? 'Need a live demo?' : 'Running this live?'}</strong>
+          <p>
+            {demoEnabled
+              ? 'The seeded demo event includes realistic questions, feedback, ratings, polls, and reactions.'
+              : 'Open the organizer dashboard to sign in, create an event, and launch a production-ready room.'}
+          </p>
         </div>
         <div className="demo-actions">
-          {demoCode ? (
-            <button type="button" onClick={() => navigate(`/event/${demoCode}`)}>
+          {demoEnabled && demoCode ? (
+            <Button type="button" onClick={() => navigate(`/event/${demoCode}`)}>
               Open demo event ({demoCode})
-            </button>
-          ) : (
-            <Link to="/dashboard">Open organizer dashboard</Link>
-          )}
-          <Link to="/dashboard">Organizer dashboard</Link>
+            </Button>
+          ) : null}
+          <Link className={buttonClasses({ variant: 'outline' })} to="/dashboard">
+            Organizer dashboard
+          </Link>
         </div>
       </section>
     </main>

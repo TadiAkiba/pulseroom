@@ -16,7 +16,14 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
+import { Alert } from '../components/ui/Alert.tsx'
+import { Badge } from '../components/ui/Badge.tsx'
+import { Button } from '../components/ui/Button.tsx'
+import { buttonClasses } from '../components/ui/buttonClasses.ts'
+import { Card, CardHeader, CardTitle, CardDescription } from '../components/ui/Card.tsx'
+import { Field, Input, Select, Textarea } from '../components/ui/Field.tsx'
 import { api } from '../lib/api.ts'
+import { parseInteractionFile } from '../lib/interactionImport.ts'
 import type { EventSnapshot } from '../types.ts'
 
 const sentimentColors = ['#34d399', '#a78bfa', '#fb7185']
@@ -25,7 +32,9 @@ export function EventDashboardPage() {
   const { eventId = '' } = useParams()
   const [snapshot, setSnapshot] = useState<EventSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
   const [saving, setSaving] = useState(false)
   const [interactionForm, setInteractionForm] = useState({
     type: 'question',
@@ -44,13 +53,13 @@ export function EventDashboardPage() {
         socket = io({
           transports: ['websocket'],
         })
-        socket.emit('event:join', response.event.id)
-        socket.on('event:update', (payload: { admin: EventSnapshot }) => {
-          setSnapshot(payload.admin)
+        socket.emit('event:join-admin', response.event.id)
+        socket.on('event:update-admin', (nextSnapshot: EventSnapshot) => {
+          setSnapshot(nextSnapshot)
         })
       })
       .catch((pageError) => {
-        setError(pageError instanceof Error ? pageError.message : 'Unable to load event dashboard.')
+        setLoadError(pageError instanceof Error ? pageError.message : 'Unable to load event dashboard.')
         setLoading(false)
       })
 
@@ -73,6 +82,8 @@ export function EventDashboardPage() {
     }
     setSaving(true)
     try {
+      setError('')
+      setNotice('')
       await api.updateEvent(snapshot.event.id, {
         status: snapshot.event.status === 'active' ? 'inactive' : 'active',
       })
@@ -96,6 +107,7 @@ export function EventDashboardPage() {
 
     setSaving(true)
     try {
+      setError('')
       await api.createInteraction(snapshot.event.id, {
         type: interactionForm.type as 'question' | 'feedback' | 'rating' | 'poll' | 'reaction',
         prompt: interactionForm.prompt,
@@ -108,8 +120,39 @@ export function EventDashboardPage() {
               : {},
       })
       setInteractionForm({ type: 'question', prompt: '', options: 'Option A, Option B' })
+      setNotice('Interaction created.')
     } catch (createError) {
       setError(createError instanceof Error ? createError.message : 'Unable to create interaction.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function uploadInteractions(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!snapshot) {
+      return
+    }
+
+    const formData = new FormData(event.currentTarget)
+    const file = formData.get('interaction-file')
+
+    if (!(file instanceof File) || file.size === 0) {
+      setError('Choose a .json or .csv file to import interactions.')
+      setNotice('')
+      return
+    }
+
+    setSaving(true)
+    try {
+      setError('')
+      const interactions = await parseInteractionFile(file)
+      const response = await api.importInteractions(snapshot.event.id, { interactions })
+      setNotice(`Imported ${response.importedCount} interaction${response.importedCount === 1 ? '' : 's'} from ${file.name}.`)
+      event.currentTarget.reset()
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : 'Unable to import interactions.')
+      setNotice('')
     } finally {
       setSaving(false)
     }
@@ -130,21 +173,21 @@ export function EventDashboardPage() {
   if (loading) {
     return (
       <main className="page center-state">
-        <div className="panel">
+        <Card className="ui-state-card">
           <h1>Loading event dashboard...</h1>
           <p>Bringing in the latest audience activity.</p>
-        </div>
+        </Card>
       </main>
     )
   }
 
-  if (error || !snapshot) {
+  if (loadError || !snapshot) {
     return (
       <main className="page center-state">
-        <div className="panel">
+        <Card className="ui-state-card">
           <h1>Unable to open this event.</h1>
-          <p>{error || 'Please check your organizer session and try again.'}</p>
-        </div>
+          <p>{loadError || 'Please check your organizer session and try again.'}</p>
+        </Card>
       </main>
     )
   }
@@ -160,23 +203,25 @@ export function EventDashboardPage() {
           </p>
         </div>
         <div className="header-actions">
-          <Link className="ghost-button" to={`/event/${snapshot.event.code}`}>
+          <Link className={buttonClasses({ variant: 'outline' })} to={`/event/${snapshot.event.code}`}>
             Attendee view
           </Link>
-          <Link className="ghost-button" to={`/present/${snapshot.event.code}`}>
+          <Link className={buttonClasses({ variant: 'outline' })} to={`/present/${snapshot.event.code}`}>
             Presenter mode
           </Link>
-          <button type="button" onClick={toggleEventStatus} disabled={saving}>
+          <Button type="button" onClick={toggleEventStatus} disabled={saving}>
             {snapshot.event.status === 'active' ? 'Deactivate' : 'Activate'}
-          </button>
+          </Button>
         </div>
       </section>
 
       {snapshot.analytics.pendingAnalyses > 0 ? (
-        <div className="flash">
+        <Alert variant="info">
           AI analysis is catching up on {snapshot.analytics.pendingAnalyses} recent text responses.
-        </div>
+        </Alert>
       ) : null}
+      {notice ? <Alert variant="success">{notice}</Alert> : null}
+      {error ? <Alert variant="danger">{error}</Alert> : null}
 
       <section className="metric-grid">
         <MetricCard label="Total responses" value={snapshot.metrics.totalResponses} />
@@ -188,11 +233,11 @@ export function EventDashboardPage() {
       </section>
 
       <section className="dashboard-two-col">
-        <article className="panel chart-panel">
-          <div className="panel-heading">
-            <h2>Engagement over time</h2>
-            <p>Automatic live updates with no refresh required.</p>
-          </div>
+        <Card className="chart-panel">
+          <CardHeader className="panel-heading">
+            <CardTitle>Engagement over time</CardTitle>
+            <CardDescription>Automatic live updates with no refresh required.</CardDescription>
+          </CardHeader>
           <ResponsiveContainer width="100%" height={260}>
             <LineChart data={snapshot.metrics.timeline}>
               <CartesianGrid stroke="#243147" strokeDasharray="3 3" />
@@ -202,13 +247,13 @@ export function EventDashboardPage() {
               <Line type="monotone" dataKey="value" stroke="#7c3aed" strokeWidth={3} />
             </LineChart>
           </ResponsiveContainer>
-        </article>
+        </Card>
 
-        <article className="panel chart-panel">
-          <div className="panel-heading">
-            <h2>Sentiment distribution</h2>
-            <p>Automated text analysis, presented as directional signal.</p>
-          </div>
+        <Card className="chart-panel">
+          <CardHeader className="panel-heading">
+            <CardTitle>Sentiment distribution</CardTitle>
+            <CardDescription>Automated text analysis, presented as directional signal.</CardDescription>
+          </CardHeader>
           <ResponsiveContainer width="100%" height={260}>
             <PieChart>
               <Pie data={sentimentData} dataKey="value" innerRadius={65} outerRadius={95}>
@@ -219,15 +264,15 @@ export function EventDashboardPage() {
               <Tooltip />
             </PieChart>
           </ResponsiveContainer>
-        </article>
+        </Card>
       </section>
 
       <section className="dashboard-three-col">
-        <article className="panel">
-          <div className="panel-heading">
-            <h2>Live question stream</h2>
-            <p>Moderator controls apply to presenter mode immediately.</p>
-          </div>
+        <Card>
+          <CardHeader className="panel-heading">
+            <CardTitle>Live question stream</CardTitle>
+            <CardDescription>Moderator controls apply to presenter mode immediately.</CardDescription>
+          </CardHeader>
           <div className="question-list">
             {snapshot.questionStream.map((question) => (
               <div key={question.id} className={`question-item ${question.highlighted ? 'highlighted' : ''}`}>
@@ -238,33 +283,33 @@ export function EventDashboardPage() {
                   </p>
                 </div>
                 <div className="question-actions">
-                  <button type="button" onClick={() => moderate(question.id, 'visible', question.highlighted)}>
+                  <Button type="button" size="sm" variant="secondary" onClick={() => moderate(question.id, 'visible', question.highlighted)}>
                     Show
-                  </button>
-                  <button type="button" onClick={() => moderate(question.id, 'hidden', false)}>
+                  </Button>
+                  <Button type="button" size="sm" variant="secondary" onClick={() => moderate(question.id, 'hidden', false)}>
                     Hide
-                  </button>
-                  <button type="button" onClick={() => moderate(question.id, 'answered', false)}>
+                  </Button>
+                  <Button type="button" size="sm" variant="secondary" onClick={() => moderate(question.id, 'answered', false)}>
                     Answered
-                  </button>
-                  <button type="button" onClick={() => moderate(question.id, question.moderationState, !question.highlighted)}>
+                  </Button>
+                  <Button type="button" size="sm" variant="outline" onClick={() => moderate(question.id, question.moderationState, !question.highlighted)}>
                     {question.highlighted ? 'Unhighlight' : 'Highlight'}
-                  </button>
-                  <button type="button" onClick={() => moderate(question.id, 'deleted', false)}>
+                  </Button>
+                  <Button type="button" size="sm" variant="danger" onClick={() => moderate(question.id, 'deleted', false)}>
                     Delete
-                  </button>
+                  </Button>
                 </div>
               </div>
             ))}
             {snapshot.questionStream.length === 0 ? <p className="muted">Questions will appear here as they arrive.</p> : null}
           </div>
-        </article>
+        </Card>
 
-        <article className="panel">
-          <div className="panel-heading">
-            <h2>Word cloud</h2>
-            <p>Meaningful terms only, scaled by frequency.</p>
-          </div>
+        <Card>
+          <CardHeader className="panel-heading">
+            <CardTitle>Word cloud</CardTitle>
+            <CardDescription>Meaningful terms only, scaled by frequency.</CardDescription>
+          </CardHeader>
           <div className="word-cloud">
             {snapshot.analytics.wordCloud.length > 0 ? (
               snapshot.analytics.wordCloud.map((entry) => (
@@ -283,51 +328,68 @@ export function EventDashboardPage() {
               <p key={concern}>{concern}</p>
             ))}
           </div>
-        </article>
+        </Card>
 
-        <article className="panel">
-          <div className="panel-heading">
-            <h2>Create interaction</h2>
-            <p>Add new audience prompts without leaving the dashboard.</p>
-          </div>
+        <Card>
+          <CardHeader className="panel-heading">
+            <CardTitle>Create interaction</CardTitle>
+            <CardDescription>Add new audience prompts or upload a file of interactions without leaving the dashboard.</CardDescription>
+          </CardHeader>
           <form className="stack-form" onSubmit={createInteraction}>
-            <select
-              value={interactionForm.type}
-              onChange={(event) => setInteractionForm((current) => ({ ...current, type: event.target.value }))}
-            >
-              <option value="question">Question</option>
-              <option value="feedback">Feedback</option>
-              <option value="rating">Rating</option>
-              <option value="poll">Poll</option>
-              <option value="reaction">Reaction</option>
-            </select>
-            <textarea
-              rows={3}
-              value={interactionForm.prompt}
-              onChange={(event) => setInteractionForm((current) => ({ ...current, prompt: event.target.value }))}
-              placeholder="Ask your audience something useful"
-            />
-            {interactionForm.type === 'poll' || interactionForm.type === 'reaction' ? (
-              <textarea
+            <Field label="Type">
+              <Select
+                value={interactionForm.type}
+                onChange={(event) => setInteractionForm((current) => ({ ...current, type: event.target.value }))}
+              >
+                <option value="question">Question</option>
+                <option value="feedback">Feedback</option>
+                <option value="rating">Rating</option>
+                <option value="poll">Poll</option>
+                <option value="reaction">Reaction</option>
+              </Select>
+            </Field>
+            <Field label="Prompt">
+              <Textarea
                 rows={3}
-                value={interactionForm.options}
-                onChange={(event) => setInteractionForm((current) => ({ ...current, options: event.target.value }))}
-                placeholder="Comma-separated options"
+                value={interactionForm.prompt}
+                onChange={(event) => setInteractionForm((current) => ({ ...current, prompt: event.target.value }))}
+                placeholder="Ask your audience something useful"
               />
+            </Field>
+            {interactionForm.type === 'poll' || interactionForm.type === 'reaction' ? (
+              <Field label="Options">
+                <Textarea
+                  rows={3}
+                  value={interactionForm.options}
+                  onChange={(event) => setInteractionForm((current) => ({ ...current, options: event.target.value }))}
+                  placeholder="Comma-separated options"
+                />
+              </Field>
             ) : null}
-            <button type="submit" disabled={saving}>
+            <Button type="submit" disabled={saving}>
               Add interaction
-            </button>
+            </Button>
           </form>
-        </article>
+          <form className="stack-form import-form" onSubmit={uploadInteractions}>
+            <Field
+              label="Import from file"
+              description="Upload a .json or .csv file with interactions. CSV columns: type, prompt, options, scale, allowMultiple, status, ordering. Use | between options."
+            >
+              <Input name="interaction-file" type="file" accept=".json,.csv,application/json,text/csv" />
+            </Field>
+            <Button type="submit" variant="outline" disabled={saving}>
+              Upload interactions
+            </Button>
+          </form>
+        </Card>
       </section>
 
       <section className="dashboard-two-col">
-        <article className="panel chart-panel">
-          <div className="panel-heading">
-            <h2>Poll results</h2>
-            <p>Live vote totals update as attendees submit.</p>
-          </div>
+        <Card className="chart-panel">
+          <CardHeader className="panel-heading">
+            <CardTitle>Poll results</CardTitle>
+            <CardDescription>Live vote totals update as attendees submit.</CardDescription>
+          </CardHeader>
           {snapshot.pollResults.map((poll) => (
             <div key={poll.id} className="poll-block">
               <strong>{poll.prompt}</strong>
@@ -343,13 +405,13 @@ export function EventDashboardPage() {
             </div>
           ))}
           {snapshot.pollResults.length === 0 ? <p className="muted">No polls configured yet.</p> : null}
-        </article>
+        </Card>
 
-        <article className="panel">
-          <div className="panel-heading">
-            <h2>Ratings and reactions</h2>
-            <p>Quick pulse checks from the audience.</p>
-          </div>
+        <Card>
+          <CardHeader className="panel-heading">
+            <CardTitle>Ratings and reactions</CardTitle>
+            <CardDescription>Quick pulse checks from the audience.</CardDescription>
+          </CardHeader>
           <div className="stack-list">
             {snapshot.ratingResults.map((rating) => (
               <div key={rating.id} className="stat-row">
@@ -377,13 +439,17 @@ export function EventDashboardPage() {
             <h3>Top themes</h3>
             <div className="chip-row">
               {snapshot.analytics.themes.length > 0 ? (
-                snapshot.analytics.themes.map((theme) => <span key={theme.theme} className="chip">{theme.theme}</span>)
+                snapshot.analytics.themes.map((theme) => (
+                  <Badge key={theme.theme} variant="outline">
+                    {theme.theme}
+                  </Badge>
+                ))
               ) : (
                 <p className="muted">Not enough text responses yet to identify dominant themes.</p>
               )}
             </div>
           </div>
-        </article>
+        </Card>
       </section>
     </main>
   )

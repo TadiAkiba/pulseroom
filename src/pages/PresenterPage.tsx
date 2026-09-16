@@ -12,6 +12,8 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
+import { Badge } from '../components/ui/Badge.tsx'
+import { Tabs, TabsList, TabsTrigger } from '../components/ui/Tabs.tsx'
 import { api } from '../lib/api.ts'
 import type { EventSnapshot } from '../types.ts'
 
@@ -36,9 +38,9 @@ export function PresenterPage() {
         socket = io({
           transports: ['websocket'],
         })
-        socket.emit('event:join', response.event.id)
-        socket.on('event:update', (payload: { publicView: EventSnapshot }) => {
-          setSnapshot(payload.publicView)
+        socket.emit('event:join-public', response.event.id)
+        socket.on('event:update-public', (nextSnapshot: EventSnapshot) => {
+          setSnapshot(nextSnapshot)
         })
       })
       .catch((pageError) => {
@@ -88,21 +90,18 @@ export function PresenterPage() {
     <main className="presenter-shell">
       <header className="presenter-header">
         <div>
-          <span className="eyebrow">{snapshot.event.name}</span>
+          <Badge variant="info">{snapshot.event.name}</Badge>
           <h1>{snapshot.event.code}</h1>
         </div>
-        <div className="presenter-tabs">
-          {views.map((item) => (
-            <button
-              key={item}
-              type="button"
-              className={view === item ? 'active' : ''}
-              onClick={() => setView(item)}
-            >
-              {item.replace('-', ' ')}
-            </button>
-          ))}
-        </div>
+        <Tabs className="presenter-tabs">
+          <TabsList>
+            {views.map((item) => (
+              <TabsTrigger key={item} active={view === item} onClick={() => setView(item)}>
+                {item.replace('-', ' ')}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
       </header>
 
       <section className="presenter-stage">

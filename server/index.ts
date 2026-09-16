@@ -1,40 +1,56 @@
 import cookieParser from 'cookie-parser'
 import express from 'express'
 import fs from 'node:fs'
-import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import http from 'node:http'
 import { Server } from 'socket.io'
 import { z } from 'zod'
 import { analyseText, buildAnalytics } from './analysis.ts'
+import { config } from './config.ts'
 import {
+  countOrganizers,
   createEvent,
   createInteraction,
+  createOrganizer,
+  createOrganizerSession,
   createOrReplaceAnalysis,
   createResponse,
+  deleteOrganizerSession,
   ensureDemoEvent,
   getEventByCode,
   getEventById,
   getInteraction,
+  getManageableEventById,
+  getOrganizerByEmail,
+  getOrganizerSession,
+  getResponse,
   initializeDatabase,
   listAnalyses,
   listEvents,
+  listEventsForOrganizer,
   listInteractions,
   listResponses,
   type InteractionType,
+  type OrganizerRecord,
   updateEvent,
   updateInteraction,
   updateResponseModeration,
 } from './db.ts'
+import { hashPassword, verifyPassword } from './security.ts'
 
-const port = Number(process.env.PORT ?? 3001)
-const organizerPasscode = process.env.ORGANIZER_PASSCODE ?? 'demo-admin'
-const sessions = new Set<string>()
+type OrganizerRequest = express.Request & {
+  organizer: OrganizerRecord
+}
+
 const rateLimitWindowMs = 2000
 const lastSubmissionByKey = new Map<string, number>()
 
 initializeDatabase()
-ensureDemoEvent()
+bootstrapOrganizer()
+
+if (config.enableDemoSeed) {
+  ensureDemoEvent(getOrganizerByEmail(config.bootstrapOrganizerEmail)?.id)
+}
 
 const app = express()
 const server = http.createServer(app)
@@ -44,6 +60,10 @@ const io = new Server(server, {
     credentials: true,
   },
 })
+
+if (config.isProduction) {
+  app.set('trust proxy', 1)
+}
 
 app.use(express.json({ limit: '1mb' }))
 app.use(cookieParser())
@@ -63,6 +83,91 @@ const interactionSchema = z.object({
   ordering: z.number().int().optional(),
 })
 
+const interactionImportSchema = z.object({
+  interactions: z.array(interactionSchema).min(1).max(100),
+})
+
+const loginSchema = z.object({
+  email: z.email(),
+  password: z.string().min(8).max(128),
+})
+
+const registerSchema = z.object({
+  email: z.email(),
+  password: z.string().min(8).max(128),
+})
+
+function bootstrapOrganizer() {
+  const email = config.bootstrapOrganizerEmail
+  const password = config.bootstrapOrganizerPassword
+
+  if (!email && !password) {
+    return
+  }
+
+  if (!email || !password) {
+    console.warn('Bootstrap organizer credentials are incomplete. Skipping bootstrap organizer creation.')
+    return
+  }
+
+  if (!getOrganizerByEmail(email)) {
+    createOrganizer({
+      email,
+      passwordHash: hashPassword(password),
+    })
+  }
+}
+
+function canRegisterOrganizer() {
+  return config.allowOrganizerSignup || countOrganizers() === 0
+}
+
+function parseCookieHeader(cookieHeader?: string) {
+  const parsed = new Map<string, string>()
+  if (!cookieHeader) {
+    return parsed
+  }
+
+  for (const fragment of cookieHeader.split(';')) {
+    const [rawKey, ...rawValue] = fragment.trim().split('=')
+    if (rawKey) {
+      parsed.set(rawKey, rawValue.join('='))
+    }
+  }
+
+  return parsed
+}
+
+function authSummary(organizer: OrganizerRecord | null) {
+  return organizer ? { email: organizer.email } : null
+}
+
+function getOrganizerFromRequest(req: express.Request) {
+  const sessionId = typeof req.cookies.organizer_session === 'string' ? req.cookies.organizer_session : ''
+  if (!sessionId) {
+    return null
+  }
+
+  return getOrganizerSession(sessionId)
+}
+
+function setSessionCookie(res: express.Response, sessionId: string) {
+  res.cookie('organizer_session', sessionId, {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: config.isProduction,
+    maxAge: config.sessionTtlHours * 60 * 60 * 1000,
+  })
+}
+
+function clearSessionCookie(res: express.Response) {
+  res.clearCookie('organizer_session', {
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: config.isProduction,
+  })
+}
+
 function toTitle(type: InteractionType) {
   return (
     {
@@ -80,13 +185,14 @@ function requireOrganizer(
   res: express.Response,
   next: express.NextFunction,
 ) {
-  const session = req.cookies.organizer_session
-  if (typeof session === 'string' && sessions.has(session)) {
-    next()
+  const lookup = getOrganizerFromRequest(req)
+  if (!lookup) {
+    res.status(401).json({ error: 'Organizer session required.' })
     return
   }
 
-  res.status(401).json({ error: 'Organizer session required.' })
+  ;(req as OrganizerRequest).organizer = lookup.organizer
+  next()
 }
 
 function createDefaultInteractions(eventId: string) {
@@ -138,6 +244,10 @@ function formatTime(iso: string) {
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(iso))
+}
+
+function ensureEventAccess(eventId: string, organizerId: string) {
+  return getManageableEventById(eventId, organizerId)
 }
 
 function buildEventSnapshot(eventId: string, includeHidden: boolean) {
@@ -288,7 +398,8 @@ async function broadcastEvent(eventId: string) {
     return
   }
 
-  io.to(`event:${eventId}`).emit('event:update', { admin, publicView })
+  io.to(`event:${eventId}:admin`).emit('event:update-admin', admin)
+  io.to(`event:${eventId}:public`).emit('event:update-public', publicView)
 }
 
 function queueAnalysis(eventId: string, responseId: string, text: string) {
@@ -332,48 +443,92 @@ function seedMissingAnalyses() {
 seedMissingAnalyses()
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true })
+  res.json({
+    ok: true,
+    mode: config.nodeEnv,
+    analysisProvider: config.analysisProvider,
+  })
 })
 
 app.get('/api/demo', (_req, res) => {
-  const demo = listEvents().find((event) => event.isDemo)
-  res.json({ demoCode: demo?.code ?? null })
+  const demo = config.enableDemoSeed ? listEvents().find((event) => event.isDemo) : null
+  res.json({ demoEnabled: config.enableDemoSeed, demoCode: demo?.code ?? null })
 })
 
 app.get('/api/auth/session', (req, res) => {
-  const session = req.cookies.organizer_session
-  res.json({ authenticated: typeof session === 'string' && sessions.has(session) })
+  const lookup = getOrganizerFromRequest(req)
+  res.json({
+    authenticated: Boolean(lookup),
+    organizer: authSummary(lookup?.organizer ?? null),
+    canRegister: canRegisterOrganizer(),
+  })
 })
 
-app.post('/api/auth/login', (req, res) => {
-  const passcode = typeof req.body?.passcode === 'string' ? req.body.passcode : ''
-  if (passcode !== organizerPasscode) {
-    res.status(401).json({ error: 'Incorrect passcode.' })
+app.post('/api/auth/register', (req, res) => {
+  if (!canRegisterOrganizer()) {
+    res.status(403).json({ error: 'Organizer signup is disabled for this deployment.' })
     return
   }
 
-  const session = randomUUID()
-  sessions.add(session)
-  res.cookie('organizer_session', session, {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: false,
-    maxAge: 1000 * 60 * 60 * 8,
+  const parsed = registerSchema.safeParse(req.body)
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Use a valid email and a password with at least 8 characters.' })
+    return
+  }
+
+  const email = parsed.data.email.trim().toLowerCase()
+  if (getOrganizerByEmail(email)) {
+    res.status(409).json({ error: 'An organizer account with this email already exists.' })
+    return
+  }
+
+  const organizer = createOrganizer({
+    email,
+    passwordHash: hashPassword(parsed.data.password),
   })
-  res.json({ authenticated: true })
+  const session = createOrganizerSession(organizer.id)
+  setSessionCookie(res, session.id)
+  res.status(201).json({
+    authenticated: true,
+    organizer: authSummary(organizer),
+    canRegister: canRegisterOrganizer(),
+  })
+})
+
+app.post('/api/auth/login', (req, res) => {
+  const parsed = loginSchema.safeParse(req.body)
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Use a valid email and password.' })
+    return
+  }
+
+  const organizer = getOrganizerByEmail(parsed.data.email)
+  if (!organizer || !verifyPassword(parsed.data.password, organizer.passwordHash)) {
+    res.status(401).json({ error: 'Incorrect email or password.' })
+    return
+  }
+
+  const session = createOrganizerSession(organizer.id)
+  setSessionCookie(res, session.id)
+  res.json({
+    authenticated: true,
+    organizer: authSummary(organizer),
+    canRegister: canRegisterOrganizer(),
+  })
 })
 
 app.post('/api/auth/logout', (req, res) => {
-  const session = req.cookies.organizer_session
-  if (typeof session === 'string') {
-    sessions.delete(session)
+  const sessionId = typeof req.cookies.organizer_session === 'string' ? req.cookies.organizer_session : ''
+  if (sessionId) {
+    deleteOrganizerSession(sessionId)
   }
-  res.clearCookie('organizer_session')
+  clearSessionCookie(res)
   res.json({ ok: true })
 })
 
-app.get('/api/admin/events', requireOrganizer, (_req, res) => {
-  res.json({ events: listEvents() })
+app.get('/api/admin/events', requireOrganizer, (req, res) => {
+  const organizer = (req as OrganizerRequest).organizer
+  res.json({ events: listEventsForOrganizer(organizer.id) })
 })
 
 app.post('/api/admin/events', requireOrganizer, (req, res) => {
@@ -383,18 +538,24 @@ app.post('/api/admin/events', requireOrganizer, (req, res) => {
     return
   }
 
-  const event = createEvent(parsed.data)
+  const organizer = (req as OrganizerRequest).organizer
+  const event = createEvent({
+    organizerId: organizer.id,
+    ...parsed.data,
+  })
   createDefaultInteractions(event.id)
   res.status(201).json({ event })
 })
 
 app.get('/api/admin/events/:eventId', requireOrganizer, (req, res) => {
-  const snapshot = buildEventSnapshot(String(req.params.eventId), true)
-  if (!snapshot) {
+  const organizer = (req as OrganizerRequest).organizer
+  const event = ensureEventAccess(String(req.params.eventId), organizer.id)
+  if (!event) {
     res.status(404).json({ error: 'Event not found.' })
     return
   }
 
+  const snapshot = buildEventSnapshot(event.id, true)
   res.json(snapshot)
 })
 
@@ -405,7 +566,14 @@ app.put('/api/admin/events/:eventId', requireOrganizer, (req, res) => {
     return
   }
 
-  const event = updateEvent(String(req.params.eventId), parsed.data)
+  const organizer = (req as OrganizerRequest).organizer
+  const current = ensureEventAccess(String(req.params.eventId), organizer.id)
+  if (!current) {
+    res.status(404).json({ error: 'Event not found.' })
+    return
+  }
+
+  const event = updateEvent(current.id, parsed.data)
   if (!event) {
     res.status(404).json({ error: 'Event not found.' })
     return
@@ -422,7 +590,8 @@ app.post('/api/admin/events/:eventId/interactions', requireOrganizer, (req, res)
     return
   }
 
-  const event = getEventById(String(req.params.eventId))
+  const organizer = (req as OrganizerRequest).organizer
+  const event = ensureEventAccess(String(req.params.eventId), organizer.id)
   if (!event) {
     res.status(404).json({ error: 'Event not found.' })
     return
@@ -436,6 +605,33 @@ app.post('/api/admin/events/:eventId/interactions', requireOrganizer, (req, res)
   res.status(201).json({ interaction })
 })
 
+app.post('/api/admin/events/:eventId/interactions/import', requireOrganizer, (req, res) => {
+  const parsed = interactionImportSchema.safeParse(req.body)
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid interaction import file. Use 1 to 100 valid interactions.' })
+    return
+  }
+
+  const organizer = (req as OrganizerRequest).organizer
+  const event = ensureEventAccess(String(req.params.eventId), organizer.id)
+  if (!event) {
+    res.status(404).json({ error: 'Event not found.' })
+    return
+  }
+
+  const existingCount = listInteractions(event.id).length
+  const interactions = parsed.data.interactions.map((item, index) =>
+    createInteraction({
+      eventId: event.id,
+      ...item,
+      ordering: item.ordering ?? existingCount + index + 1,
+    }),
+  )
+
+  void broadcastEvent(event.id)
+  res.status(201).json({ interactions, importedCount: interactions.length })
+})
+
 app.put('/api/admin/interactions/:interactionId', requireOrganizer, (req, res) => {
   const parsed = interactionSchema.partial().safeParse(req.body)
   if (!parsed.success) {
@@ -443,19 +639,26 @@ app.put('/api/admin/interactions/:interactionId', requireOrganizer, (req, res) =
     return
   }
 
+  const organizer = (req as OrganizerRequest).organizer
   const current = getInteraction(String(req.params.interactionId))
   if (!current) {
     res.status(404).json({ error: 'Interaction not found.' })
     return
   }
 
-  const interaction = updateInteraction(String(req.params.interactionId), parsed.data)
+  const event = ensureEventAccess(current.eventId, organizer.id)
+  if (!event) {
+    res.status(404).json({ error: 'Interaction not found.' })
+    return
+  }
+
+  const interaction = updateInteraction(current.id, parsed.data)
   if (!interaction) {
     res.status(404).json({ error: 'Interaction not found.' })
     return
   }
 
-  void broadcastEvent(current.eventId)
+  void broadcastEvent(event.id)
   res.json({ interaction })
 })
 
@@ -470,17 +673,21 @@ app.patch('/api/admin/responses/:responseId', requireOrganizer, (req, res) => {
     return
   }
 
-  const current = listEvents()
-    .flatMap((event) => listResponses(event.id))
-      .find((response) => response.id === String(req.params.responseId))
-
+  const organizer = (req as OrganizerRequest).organizer
+  const current = getResponse(String(req.params.responseId))
   if (!current) {
     res.status(404).json({ error: 'Response not found.' })
     return
   }
 
+  const event = ensureEventAccess(current.eventId, organizer.id)
+  if (!event) {
+    res.status(404).json({ error: 'Response not found.' })
+    return
+  }
+
   const updated = updateResponseModeration(
-      String(req.params.responseId),
+    current.id,
     parsed.data.moderationState ?? current.moderationState,
     parsed.data.highlighted,
   )
@@ -490,7 +697,7 @@ app.patch('/api/admin/responses/:responseId', requireOrganizer, (req, res) => {
     return
   }
 
-  void broadcastEvent(current.eventId)
+  void broadcastEvent(event.id)
   res.json({ response: updated })
 })
 
@@ -509,7 +716,7 @@ app.get('/api/events/code/:code', (req, res) => {
     snapshot,
     privacy: {
       notice:
-        'Responses are anonymous. The app stores submissions, timestamps, moderation state, and derived analysis, but does not collect names, emails, or attendee accounts.',
+        'Responses are anonymous. The app stores submissions, timestamps, moderation state, and derived analysis, but does not collect names, emails, attendee accounts, or persistent audience identifiers.',
     },
   })
 })
@@ -633,18 +840,38 @@ app.post('/api/events/code/:code/responses', (req, res) => {
 })
 
 io.on('connection', (socket) => {
-  socket.on('event:join', async (eventId: string) => {
-    socket.join(`event:${eventId}`)
-    const admin = buildEventSnapshot(eventId, true)
-    const publicView = buildEventSnapshot(eventId, false)
-    if (admin && publicView) {
-      socket.emit('event:update', { admin, publicView })
+  socket.on('event:join-public', (eventId: string) => {
+    const snapshot = buildEventSnapshot(eventId, false)
+    if (!snapshot) {
+      return
     }
+
+    socket.join(`event:${eventId}:public`)
+    socket.emit('event:update-public', snapshot)
+  })
+
+  socket.on('event:join-admin', (eventId: string) => {
+    const cookies = parseCookieHeader(socket.handshake.headers.cookie)
+    const sessionId = cookies.get('organizer_session') ?? ''
+    const lookup = sessionId ? getOrganizerSession(sessionId) : null
+    const event = lookup ? ensureEventAccess(eventId, lookup.organizer.id) : null
+    if (!lookup || !event) {
+      socket.emit('event:error', { message: 'Organizer session required for admin stream.' })
+      return
+    }
+
+    const snapshot = buildEventSnapshot(event.id, true)
+    if (!snapshot) {
+      return
+    }
+
+    socket.join(`event:${eventId}:admin`)
+    socket.emit('event:update-admin', snapshot)
   })
 })
 
 const distPath = path.resolve(process.cwd(), 'dist')
-if (process.env.NODE_ENV === 'production' && fs.existsSync(distPath)) {
+if (config.isProduction && fs.existsSync(distPath)) {
   app.use(express.static(distPath))
   app.get('*', (req, res, next) => {
     if (req.path.startsWith('/api')) {
@@ -655,6 +882,6 @@ if (process.env.NODE_ENV === 'production' && fs.existsSync(distPath)) {
   })
 }
 
-server.listen(port, () => {
-  console.log(`Live engagement platform running on http://localhost:${port}`)
+server.listen(config.port, () => {
+  console.log(`PulseRoom running on ${config.appUrl}`)
 })

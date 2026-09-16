@@ -2,12 +2,28 @@ import Database from 'better-sqlite3'
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { config } from './config.ts'
 
 export type InteractionType = 'question' | 'feedback' | 'rating' | 'poll' | 'reaction'
 export type ModerationState = 'pending' | 'visible' | 'hidden' | 'answered' | 'deleted'
 
+export type OrganizerRecord = {
+  id: string
+  email: string
+  passwordHash: string
+  createdAt: string
+}
+
+export type OrganizerSessionRecord = {
+  id: string
+  organizerId: string
+  expiresAt: string
+  createdAt: string
+}
+
 export type EventRecord = {
   id: string
+  organizerId: string | null
   code: string
   name: string
   description: string
@@ -52,19 +68,26 @@ export type AnalysisRecord = {
   createdAt: string
 }
 
-const dataPath = path.resolve(process.cwd(), 'data')
-const dbFile = path.join(dataPath, 'engagement.sqlite')
+export type OrganizerSessionLookup = {
+  session: OrganizerSessionRecord
+  organizer: OrganizerRecord
+}
 
+const dataPath = path.dirname(config.databasePath)
 fs.mkdirSync(dataPath, { recursive: true })
 
-export const db = new Database(dbFile)
-
+export const db = new Database(config.databasePath)
 db.pragma('journal_mode = WAL')
+db.pragma('foreign_keys = ON')
 
 type RawRow = Record<string, unknown>
 
 function now() {
   return new Date().toISOString()
+}
+
+function futureIso(hours: number) {
+  return new Date(Date.now() + hours * 60 * 60 * 1000).toISOString()
 }
 
 function parseJson<T>(value: unknown, fallback: T): T {
@@ -79,9 +102,24 @@ function parseJson<T>(value: unknown, fallback: T): T {
   }
 }
 
+function hasColumn(tableName: string, columnName: string) {
+  const columns = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>
+  return columns.some((column) => column.name === columnName)
+}
+
+function rowToOrganizer(row: RawRow): OrganizerRecord {
+  return {
+    id: String(row.id),
+    email: String(row.email),
+    passwordHash: String(row.password_hash),
+    createdAt: String(row.created_at),
+  }
+}
+
 function rowToEvent(row: RawRow): EventRecord {
   return {
     id: String(row.id),
+    organizerId: row.organizer_id ? String(row.organizer_id) : null,
     code: String(row.code),
     name: String(row.name),
     description: String(row.description ?? ''),
@@ -135,8 +173,24 @@ function rowToAnalysis(row: RawRow): AnalysisRecord {
 
 export function initializeDatabase() {
   db.exec(`
+    CREATE TABLE IF NOT EXISTS organizers (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS organizer_sessions (
+      id TEXT PRIMARY KEY,
+      organizer_id TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (organizer_id) REFERENCES organizers (id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS events (
       id TEXT PRIMARY KEY,
+      organizer_id TEXT,
       name TEXT NOT NULL,
       description TEXT DEFAULT '',
       code TEXT NOT NULL UNIQUE,
@@ -144,7 +198,8 @@ export function initializeDatabase() {
       config TEXT NOT NULL DEFAULT '{}',
       is_demo INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (organizer_id) REFERENCES organizers (id) ON DELETE SET NULL
     );
 
     CREATE TABLE IF NOT EXISTS interactions (
@@ -157,7 +212,7 @@ export function initializeDatabase() {
       status TEXT NOT NULL DEFAULT 'active',
       ordering INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
-      FOREIGN KEY (event_id) REFERENCES events (id)
+      FOREIGN KEY (event_id) REFERENCES events (id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS responses (
@@ -169,8 +224,8 @@ export function initializeDatabase() {
       moderation_state TEXT NOT NULL DEFAULT 'visible',
       highlighted INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
-      FOREIGN KEY (event_id) REFERENCES events (id),
-      FOREIGN KEY (interaction_id) REFERENCES interactions (id)
+      FOREIGN KEY (event_id) REFERENCES events (id) ON DELETE CASCADE,
+      FOREIGN KEY (interaction_id) REFERENCES interactions (id) ON DELETE CASCADE
     );
 
     CREATE TABLE IF NOT EXISTS analyses (
@@ -182,10 +237,14 @@ export function initializeDatabase() {
       themes_json TEXT NOT NULL DEFAULT '[]',
       summary TEXT DEFAULT '',
       created_at TEXT NOT NULL,
-      FOREIGN KEY (response_id) REFERENCES responses (id),
-      FOREIGN KEY (event_id) REFERENCES events (id)
+      FOREIGN KEY (response_id) REFERENCES responses (id) ON DELETE CASCADE,
+      FOREIGN KEY (event_id) REFERENCES events (id) ON DELETE CASCADE
     );
   `)
+
+  if (!hasColumn('events', 'organizer_id')) {
+    db.exec('ALTER TABLE events ADD COLUMN organizer_id TEXT REFERENCES organizers(id) ON DELETE SET NULL')
+  }
 }
 
 function generateEventCode() {
@@ -199,8 +258,121 @@ function generateEventCode() {
   }
 }
 
+export function countOrganizers() {
+  const row = db.prepare('SELECT COUNT(*) as count FROM organizers').get() as { count: number }
+  return Number(row.count)
+}
+
+export function getOrganizerByEmail(email: string) {
+  const row = db.prepare('SELECT * FROM organizers WHERE email = ?').get(email.toLowerCase()) as RawRow | undefined
+  return row ? rowToOrganizer(row) : null
+}
+
+export function createOrganizer(input: { email: string; passwordHash: string }) {
+  const organizer: OrganizerRecord = {
+    id: randomUUID(),
+    email: input.email.trim().toLowerCase(),
+    passwordHash: input.passwordHash,
+    createdAt: now(),
+  }
+
+  db.prepare(
+    `
+      INSERT INTO organizers (id, email, password_hash, created_at)
+      VALUES (@id, @email, @password_hash, @created_at)
+    `,
+  ).run({
+    id: organizer.id,
+    email: organizer.email,
+    password_hash: organizer.passwordHash,
+    created_at: organizer.createdAt,
+  })
+
+  return organizer
+}
+
+export function createOrganizerSession(organizerId: string) {
+  const session: OrganizerSessionRecord = {
+    id: randomUUID(),
+    organizerId,
+    expiresAt: futureIso(config.sessionTtlHours),
+    createdAt: now(),
+  }
+
+  db.prepare(
+    `
+      INSERT INTO organizer_sessions (id, organizer_id, expires_at, created_at)
+      VALUES (@id, @organizer_id, @expires_at, @created_at)
+    `,
+  ).run({
+    id: session.id,
+    organizer_id: session.organizerId,
+    expires_at: session.expiresAt,
+    created_at: session.createdAt,
+  })
+
+  return session
+}
+
+export function deleteExpiredSessions() {
+  db.prepare('DELETE FROM organizer_sessions WHERE expires_at <= ?').run(now())
+}
+
+export function getOrganizerSession(sessionId: string) {
+  deleteExpiredSessions()
+  const row = db
+    .prepare(
+      `
+        SELECT
+          s.id as session_id,
+          s.organizer_id as session_organizer_id,
+          s.expires_at,
+          s.created_at as session_created_at,
+          o.id,
+          o.email,
+          o.password_hash,
+          o.created_at
+        FROM organizer_sessions s
+        JOIN organizers o ON o.id = s.organizer_id
+        WHERE s.id = ?
+      `,
+    )
+    .get(sessionId) as RawRow | undefined
+
+  if (!row) {
+    return null
+  }
+
+  return {
+    session: {
+      id: String(row.session_id),
+      organizerId: String(row.session_organizer_id),
+      expiresAt: String(row.expires_at),
+      createdAt: String(row.session_created_at),
+    },
+    organizer: rowToOrganizer(row),
+  } satisfies OrganizerSessionLookup
+}
+
+export function deleteOrganizerSession(sessionId: string) {
+  db.prepare('DELETE FROM organizer_sessions WHERE id = ?').run(sessionId)
+}
+
 export function listEvents() {
   const rows = db.prepare('SELECT * FROM events ORDER BY created_at DESC').all() as RawRow[]
+  return rows.map(rowToEvent)
+}
+
+export function listEventsForOrganizer(organizerId: string) {
+  const rows = db
+    .prepare(
+      `
+        SELECT * FROM events
+        WHERE organizer_id = ? OR is_demo = 1
+        ORDER BY created_at DESC
+      `,
+    )
+    .all(organizerId) as RawRow[]
   return rows.map(rowToEvent)
 }
 
@@ -209,16 +381,30 @@ export function getEventById(id: string) {
   return row ? rowToEvent(row) : null
 }
 
+export function getManageableEventById(id: string, organizerId: string) {
+  const row = db
+    .prepare('SELECT * FROM events WHERE id = ? AND (organizer_id = ? OR is_demo = 1)')
+    .get(id, organizerId) as RawRow | undefined
+  return row ? rowToEvent(row) : null
+}
+
 export function getEventByCode(code: string) {
   const row = db.prepare('SELECT * FROM events WHERE code = ?').get(code.toUpperCase()) as RawRow | undefined
   return row ? rowToEvent(row) : null
 }
 
-export function createEvent(input: { name: string; description?: string; status?: 'active' | 'inactive'; isDemo?: boolean }) {
+export function createEvent(input: {
+  organizerId: string | null
+  name: string
+  description?: string
+  status?: 'active' | 'inactive'
+  isDemo?: boolean
+}) {
   const id = randomUUID()
   const timestamp = now()
   const event = {
     id,
+    organizerId: input.organizerId,
     code: generateEventCode(),
     name: input.name.trim(),
     description: (input.description ?? '').trim(),
@@ -234,11 +420,12 @@ export function createEvent(input: { name: string; description?: string; status?
 
   db.prepare(
     `
-      INSERT INTO events (id, name, description, code, status, config, is_demo, created_at, updated_at)
-      VALUES (@id, @name, @description, @code, @status, @config, @is_demo, @created_at, @updated_at)
+      INSERT INTO events (id, organizer_id, name, description, code, status, config, is_demo, created_at, updated_at)
+      VALUES (@id, @organizer_id, @name, @description, @code, @status, @config, @is_demo, @created_at, @updated_at)
     `,
   ).run({
     id: event.id,
+    organizer_id: event.organizerId,
     name: event.name,
     description: event.description,
     code: event.code,
@@ -252,7 +439,10 @@ export function createEvent(input: { name: string; description?: string; status?
   return event
 }
 
-export function updateEvent(id: string, input: Partial<Pick<EventRecord, 'name' | 'description' | 'status'>> & { config?: Record<string, unknown> }) {
+export function updateEvent(
+  id: string,
+  input: Partial<Pick<EventRecord, 'name' | 'description' | 'status'>> & { config?: Record<string, unknown> },
+) {
   const existing = getEventById(id)
   if (!existing) {
     return null
@@ -378,7 +568,9 @@ export function updateInteraction(
 }
 
 export function listResponses(eventId: string) {
-  const rows = db.prepare('SELECT * FROM responses WHERE event_id = ? ORDER BY created_at DESC').all(eventId) as RawRow[]
+  const rows = db
+    .prepare('SELECT * FROM responses WHERE event_id = ? ORDER BY created_at DESC')
+    .all(eventId) as RawRow[]
   return rows.map(rowToResponse)
 }
 
@@ -489,17 +681,20 @@ export function createOrReplaceAnalysis(input: Omit<AnalysisRecord, 'id' | 'crea
 }
 
 export function listAnalyses(eventId: string) {
-  const rows = db.prepare('SELECT * FROM analyses WHERE event_id = ? ORDER BY created_at DESC').all(eventId) as RawRow[]
+  const rows = db
+    .prepare('SELECT * FROM analyses WHERE event_id = ? ORDER BY created_at DESC')
+    .all(eventId) as RawRow[]
   return rows.map(rowToAnalysis)
 }
 
-export function ensureDemoEvent() {
+export function ensureDemoEvent(organizerId?: string) {
   const demo = db.prepare('SELECT * FROM events WHERE is_demo = 1 LIMIT 1').get() as RawRow | undefined
   if (demo) {
     return rowToEvent(demo)
   }
 
   const event = createEvent({
+    organizerId: organizerId ?? null,
     name: 'Future of Product Summit',
     description: 'Demo event with seeded live engagement data for presenter mode and dashboard exploration.',
     isDemo: true,
@@ -621,5 +816,5 @@ export function ensureDemoEvent() {
     })
   }
 
-  return event
+  return getEventById(event.id)
 }

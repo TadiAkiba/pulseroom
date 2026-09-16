@@ -1,15 +1,30 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
+import { Alert } from '../components/ui/Alert.tsx'
+import { Button } from '../components/ui/Button.tsx'
+import { buttonClasses } from '../components/ui/buttonClasses.ts'
+import { Card, CardContent, CardDescription, CardTitle } from '../components/ui/Card.tsx'
+import { Field, Input, Textarea } from '../components/ui/Field.tsx'
+import { Tabs, TabsList, TabsTrigger } from '../components/ui/Tabs.tsx'
 import { api } from '../lib/api.ts'
-import type { EventRecord } from '../types.ts'
+import type { AuthSession, EventRecord } from '../types.ts'
+
+type AuthMode = 'login' | 'register'
+
+const emptySession: AuthSession = {
+  authenticated: false,
+  organizer: null,
+  canRegister: false,
+}
 
 export function DashboardPage() {
   const navigate = useNavigate()
-  const [authenticated, setAuthenticated] = useState(false)
+  const [session, setSession] = useState<AuthSession>(emptySession)
   const [loading, setLoading] = useState(true)
   const [events, setEvents] = useState<EventRecord[]>([])
-  const [passcode, setPasscode] = useState('')
+  const [mode, setMode] = useState<AuthMode>('login')
+  const [credentials, setCredentials] = useState({ email: '', password: '' })
   const [error, setError] = useState('')
   const [form, setForm] = useState({ name: '', description: '' })
 
@@ -21,26 +36,31 @@ export function DashboardPage() {
   useEffect(() => {
     api
       .session()
-      .then(async (session) => {
-        setAuthenticated(session.authenticated)
-        if (session.authenticated) {
+      .then(async (currentSession) => {
+        setSession(currentSession)
+        if (currentSession.authenticated) {
           await loadEvents()
+        } else if (currentSession.canRegister) {
+          setMode('register')
         }
       })
       .catch(() => undefined)
       .finally(() => setLoading(false))
   }, [])
 
-  async function handleLogin(event: FormEvent<HTMLFormElement>) {
+  async function handleAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setError('')
 
     try {
-      await api.login(passcode)
-      setAuthenticated(true)
+      const nextSession =
+        mode === 'register'
+          ? await api.register(credentials)
+          : await api.login(credentials)
+      setSession(nextSession)
       await loadEvents()
-    } catch (loginError) {
-      setError(loginError instanceof Error ? loginError.message : 'Unable to sign in.')
+    } catch (authError) {
+      setError(authError instanceof Error ? authError.message : 'Unable to continue.')
     }
   }
 
@@ -63,39 +83,74 @@ export function DashboardPage() {
 
   async function handleLogout() {
     await api.logout()
-    setAuthenticated(false)
+    const nextSession = await api.session()
+    setSession(nextSession)
     setEvents([])
   }
 
   if (loading) {
     return (
       <main className="page center-state">
-        <div className="panel">
-          <h1>Opening dashboard...</h1>
-          <p>Checking your organizer session.</p>
-        </div>
+        <Card className="ui-state-card">
+          <CardContent>
+            <CardTitle>Opening dashboard...</CardTitle>
+            <CardDescription>Checking your organizer session.</CardDescription>
+          </CardContent>
+        </Card>
       </main>
     )
   }
 
-  if (!authenticated) {
+  if (!session.authenticated) {
     return (
       <main className="page center-state">
-        <div className="panel auth-panel">
+        <Card className="auth-panel">
           <span className="eyebrow">Organizer access</span>
-          <h1>Sign in to manage live events</h1>
-          <p>Use your organizer passcode. For local demo mode, the default is <code>demo-admin</code>.</p>
-          <form onSubmit={handleLogin}>
-            <input
-              type="password"
-              value={passcode}
-              onChange={(event) => setPasscode(event.target.value)}
-              placeholder="Enter passcode"
-            />
-            <button type="submit">Open dashboard</button>
+          <h1>{mode === 'register' ? 'Create your organizer account' : 'Sign in to manage live events'}</h1>
+          <p>
+            {session.canRegister
+              ? 'Organizer accounts are stored securely and sessions survive restarts.'
+              : 'Use the organizer credentials configured for this deployment.'}
+          </p>
+
+          {session.canRegister ? (
+            <Tabs>
+              <TabsList className="auth-tabs">
+                <TabsTrigger active={mode === 'login'} onClick={() => setMode('login')}>
+                  Sign in
+                </TabsTrigger>
+                <TabsTrigger active={mode === 'register'} onClick={() => setMode('register')}>
+                  Create account
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+          ) : null}
+
+          <form onSubmit={handleAuth} className="stack-form">
+            <Field label="Email">
+              <Input
+                type="email"
+                value={credentials.email}
+                onChange={(event) => setCredentials((current) => ({ ...current, email: event.target.value }))}
+                placeholder="organizer@company.com"
+                autoComplete="email"
+              />
+            </Field>
+            <Field label="Password">
+              <Input
+                type="password"
+                value={credentials.password}
+                onChange={(event) => setCredentials((current) => ({ ...current, password: event.target.value }))}
+                placeholder="Enter password"
+                autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
+              />
+            </Field>
+            <Button type="submit" block>
+              {mode === 'register' ? 'Create organizer account' : 'Open dashboard'}
+            </Button>
           </form>
-          {error ? <p className="inline-error">{error}</p> : null}
-        </div>
+          {error ? <Alert variant="danger">{error}</Alert> : null}
+        </Card>
       </main>
     )
   }
@@ -106,38 +161,45 @@ export function DashboardPage() {
         <div>
           <span className="eyebrow">Organizer dashboard</span>
           <h1>Run live events without refreshing the room.</h1>
-          <p>Create events, moderate audience questions, and launch presenter mode in one place.</p>
+          <p>
+            Signed in as <strong>{session.organizer?.email}</strong>. Create events, moderate questions, and launch presenter mode.
+          </p>
         </div>
-        <button type="button" className="ghost-button" onClick={handleLogout}>
+        <Button type="button" variant="outline" onClick={handleLogout}>
           Sign out
-        </button>
+        </Button>
       </section>
 
       <section className="dashboard-grid">
-        <article className="panel">
-          <h2>Create an event</h2>
+        <Card>
+          <CardTitle>Create an event</CardTitle>
           <form className="stack-form" onSubmit={handleCreate}>
-            <input
-              value={form.name}
-              onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
-              placeholder="Quarterly product town hall"
-            />
-            <textarea
-              value={form.description}
-              onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
-              placeholder="Short event description"
-              rows={4}
-            />
-            <button type="submit">Create event</button>
+            <Field label="Event name">
+              <Input
+                value={form.name}
+                onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
+                placeholder="Quarterly product town hall"
+              />
+            </Field>
+            <Field label="Description">
+              <Textarea
+                value={form.description}
+                onChange={(event) => setForm((current) => ({ ...current, description: event.target.value }))}
+                placeholder="Short event description"
+                rows={4}
+              />
+            </Field>
+            <Button type="submit">Create event</Button>
           </form>
-          {error ? <p className="inline-error">{error}</p> : null}
-        </article>
+          {error ? <Alert variant="danger">{error}</Alert> : null}
+        </Card>
 
-        <article className="panel">
-          <h2>Your events</h2>
+        <Card>
+          <CardTitle>Your events</CardTitle>
           <div className="event-list">
             {events.map((event) => (
-              <Link key={event.id} className="event-row" to={`/dashboard/${event.id}`}>
+              <Link key={event.id} className={buttonClasses({ variant: 'ghost', className: 'event-row-link' })} to={`/dashboard/${event.id}`}>
+                <div className="event-row">
                 <div>
                   <strong>{event.name}</strong>
                   <p>
@@ -145,11 +207,12 @@ export function DashboardPage() {
                   </p>
                 </div>
                 <span>{event.isDemo ? 'Demo' : 'Live'}</span>
+                </div>
               </Link>
             ))}
             {events.length === 0 ? <p className="muted">No events yet. Create one to get started.</p> : null}
           </div>
-        </article>
+        </Card>
       </section>
     </main>
   )

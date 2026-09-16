@@ -1,5 +1,5 @@
 {
-  "name": "sentiment-analysis",
+  "name": "pulseroom",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -22,6 +22,7 @@
     "recharts": "^3.10.1",
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3",
+    "tsx": "^4.23.13",
     "zod": "^4.6.5"
   },
   "devDependencies": {
@@ -34,7 +35,6 @@
     "@vitejs/plugin-react": "^6.1.1",
     "concurrently": "^10.0.5",
     "oxlint": "^1.81.0",
-    "tsx": "^4.23.13",
     "typescript": "~6.0.2",
     "vite": "^8.3.0"
   }

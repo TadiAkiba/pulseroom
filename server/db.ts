@@ -798,109 +798,196 @@ export function ensureDemoEvent(organizerId?: string) {
     isDemo: true,
   })
 
-  const question = createInteraction({
-    eventId: event.id,
-    type: 'question',
-    prompt: 'What question would you like the speaker to answer next?',
-  })
-  const feedback = createInteraction({
+  const ideaText = createInteraction({
     eventId: event.id,
     type: 'feedback',
-    prompt: 'What did you think about this session so far?',
-    ordering: 2,
+    prompt: 'What is your AI idea?',
+    settings: {
+      formKey: 'idea',
+      formTitle: 'AI Idea',
+      formDescription: 'Tell us in your own words.',
+      questionNumber: 1,
+      questionCount: 5,
+      points: 10,
+      feedEligible: true,
+    },
   })
-  const rating = createInteraction({
-    eventId: event.id,
-    type: 'rating',
-    prompt: 'How valuable is this session?',
-    settings: { scale: 5 },
-    ordering: 3,
-  })
-  const poll = createInteraction({
+  const ideaImprove = createInteraction({
     eventId: event.id,
     type: 'poll',
-    prompt: 'Which topic should we cover next?',
-    options: ['Implementation roadmap', 'Pricing strategy', 'AI governance', 'Customer onboarding'],
-    settings: { allowMultiple: false },
+    prompt: 'What would this improve?',
+    options: ['Customer experience', 'Employee experience', 'Productivity', 'Cost / efficiency', 'Revenue / growth'],
+    settings: { formKey: 'idea', formTitle: 'AI Idea', questionNumber: 2, questionCount: 5, allowMultiple: true, points: 2 },
+    ordering: 2,
+  })
+  const ideaBenefit = createInteraction({
+    eventId: event.id,
+    type: 'poll',
+    prompt: 'Who would benefit most?',
+    options: ['Customers', 'Employees', 'Managers', 'The business', 'Everyone'],
+    settings: { formKey: 'idea', formTitle: 'AI Idea', questionNumber: 3, questionCount: 5, allowMultiple: false, points: 2 },
+    ordering: 3,
+  })
+  const ideaValue = createInteraction({
+    eventId: event.id,
+    type: 'rating',
+    prompt: 'How valuable do you think this could be?',
+    settings: { formKey: 'idea', formTitle: 'AI Idea', questionNumber: 4, questionCount: 5, scale: 4, labels: ['Low', 'Medium', 'High', 'Game-changing'], points: 3 },
     ordering: 4,
   })
-  const reactions = createInteraction({
+  const ideaEase = createInteraction({
     eventId: event.id,
-    type: 'reaction',
-    prompt: 'How are you feeling?',
-    options: ['Like', 'Interesting', 'Confused', 'Agree', 'Disagree', 'Excited'],
+    type: 'poll',
+    prompt: 'How easy do you think it would be to implement?',
+    options: ['Easy', 'Moderate', 'Difficult', 'Not sure'],
+    settings: { formKey: 'idea', formTitle: 'AI Idea', questionNumber: 5, questionCount: 5, allowMultiple: false, points: 2 },
     ordering: 5,
+  })
+  const opportunityWhere = createInteraction({
+    eventId: event.id,
+    type: 'feedback',
+    prompt: 'Where do you see an opportunity for AI?',
+    settings: { formKey: 'opportunity', formTitle: 'AI Opportunity', questionNumber: 1, questionCount: 5, points: 8, feedEligible: true },
+    ordering: 6,
+  })
+  const opportunityProblem = createInteraction({
+    eventId: event.id,
+    type: 'feedback',
+    prompt: 'What problem could AI solve?',
+    settings: { formKey: 'opportunity', formTitle: 'AI Opportunity', questionNumber: 2, questionCount: 5, points: 6, feedEligible: true },
+    ordering: 7,
+  })
+  const opportunityFrequency = createInteraction({
+    eventId: event.id,
+    type: 'poll',
+    prompt: 'How often does this problem occur?',
+    options: ['Daily', 'Weekly', 'Monthly', 'Occasionally'],
+    settings: { formKey: 'opportunity', formTitle: 'AI Opportunity', questionNumber: 3, questionCount: 5, allowMultiple: false, points: 2 },
+    ordering: 8,
+  })
+  const opportunityImpact = createInteraction({
+    eventId: event.id,
+    type: 'poll',
+    prompt: 'What would the impact be?',
+    options: ['Save time', 'Reduce costs', 'Improve quality', 'Improve customer experience', 'Increase revenue', 'Reduce risk'],
+    settings: { formKey: 'opportunity', formTitle: 'AI Opportunity', questionNumber: 4, questionCount: 5, allowMultiple: false, points: 2 },
+    ordering: 9,
+  })
+  const opportunityExcitement = createInteraction({
+    eventId: event.id,
+    type: 'rating',
+    prompt: 'How excited are you about this opportunity?',
+    settings: { formKey: 'opportunity', formTitle: 'AI Opportunity', questionNumber: 5, questionCount: 5, scale: 4, labels: ['Not yet', 'Curious', 'Excited', 'Very excited'], points: 2 },
+    ordering: 10,
+  })
+  const concernTheme = createInteraction({
+    eventId: event.id,
+    type: 'poll',
+    prompt: 'What concerns you most about AI?',
+    options: ['Job security', 'Privacy', 'Data security', 'Incorrect information', 'Bias / unfair decisions', 'Loss of human interaction', 'Lack of understanding', 'Too much change'],
+    settings: { formKey: 'concern', formTitle: 'AI Concern', formDescription: 'There are no wrong answers. Your response is anonymous.', questionNumber: 1, questionCount: 4, allowMultiple: false, points: 3 },
+    ordering: 11,
+  })
+  const concernDetail = createInteraction({
+    eventId: event.id,
+    type: 'feedback',
+    prompt: 'Tell us more.',
+    settings: { formKey: 'concern', formTitle: 'AI Concern', questionNumber: 2, questionCount: 4, points: 4, feedEligible: false },
+    ordering: 12,
+  })
+  const concernLevel = createInteraction({
+    eventId: event.id,
+    type: 'rating',
+    prompt: 'How concerned are you?',
+    settings: { formKey: 'concern', formTitle: 'AI Concern', questionNumber: 3, questionCount: 4, scale: 4, labels: ['Not concerned', 'Slightly concerned', 'Concerned', 'Very concerned'], points: 2 },
+    ordering: 13,
+  })
+  const concernAction = createInteraction({
+    eventId: event.id,
+    type: 'feedback',
+    prompt: 'What would make you feel more comfortable with AI?',
+    settings: { formKey: 'concern', formTitle: 'AI Concern', questionNumber: 4, questionCount: 4, points: 6, feedEligible: false, helperText: 'This is especially useful because it turns fear into action.' },
+    ordering: 14,
   })
 
   const seededResponses = [
     {
-      interactionId: question.id,
-      responseType: 'question' as const,
-      moderationState: 'visible' as const,
-      content: { text: 'Can you share a realistic implementation timeline for a mid-sized team?' },
-    },
-    {
-      interactionId: question.id,
-      responseType: 'question' as const,
-      moderationState: 'visible' as const,
-      content: { text: 'How does pricing change as usage grows across departments?' },
-    },
-    {
-      interactionId: question.id,
-      responseType: 'question' as const,
-      moderationState: 'answered' as const,
-      content: { text: 'What support is available during rollout and training?' },
-    },
-    {
-      interactionId: feedback.id,
+      interactionId: ideaText.id,
       responseType: 'feedback' as const,
       moderationState: 'visible' as const,
-      content: { text: 'Very engaging session. The examples are practical and the product feels easy to adopt.' },
+      content: { text: 'Use AI to draft customer follow-up emails from CRM notes.', attendeeKey: 'demo-1', nickname: 'BrightNova42', team: 'Catalysts' },
     },
     {
-      interactionId: feedback.id,
+      interactionId: ideaText.id,
       responseType: 'feedback' as const,
       moderationState: 'visible' as const,
-      content: { text: 'Great overview, but several of us still want more clarity around pricing and onboarding effort.' },
+      content: { text: 'Give managers an AI co-pilot to summarize delivery risks before weekly reviews.', attendeeKey: 'demo-2', nickname: 'SignalPulse58', team: 'Builders' },
     },
     {
-      interactionId: feedback.id,
+      interactionId: opportunityWhere.id,
       responseType: 'feedback' as const,
       moderationState: 'visible' as const,
-      content: { text: 'The product looks promising, though implementation complexity is still a concern for my team.' },
+      content: { text: 'AI could help service teams spot repeat complaints before churn spikes.', attendeeKey: 'demo-3', nickname: 'CuriousEcho21', team: 'Navigators' },
     },
-    ...[5, 4, 5, 4, 5, 4].map((value) => ({
-      interactionId: rating.id,
-      responseType: 'rating' as const,
+    {
+      interactionId: opportunityProblem.id,
+      responseType: 'feedback' as const,
       moderationState: 'visible' as const,
-      content: { value },
-    })),
+      content: { text: 'We lose hours each week searching for answers across scattered docs and chats.', attendeeKey: 'demo-4', nickname: 'BoldVector33', team: 'Trailblazers' },
+    },
+    {
+      interactionId: concernDetail.id,
+      responseType: 'feedback' as const,
+      moderationState: 'visible' as const,
+      content: { text: 'I worry teams will over-trust generated answers without enough review.', attendeeKey: 'demo-5', nickname: 'CalmBeacon67', team: 'Builders' },
+    },
+    {
+      interactionId: concernAction.id,
+      responseType: 'feedback' as const,
+      moderationState: 'visible' as const,
+      content: { text: 'Show us clear governance rules and examples of when human approval is required.', attendeeKey: 'demo-6', nickname: 'SharpOrbit74', team: 'Navigators' },
+    },
+    ...[ideaValue.id, opportunityExcitement.id, concernLevel.id].flatMap((interactionId, index) =>
+      [4, 3, 4].map((value, offset) => ({
+        interactionId,
+        responseType: 'rating' as const,
+        moderationState: 'visible' as const,
+        content: {
+          value: Math.max(1, Math.min(4, value - (index === 1 ? offset % 2 : 0))),
+          attendeeKey: `demo-rating-${interactionId}-${offset}`,
+          nickname: `DemoRating${index}${offset}`,
+          team: ['Catalysts', 'Builders', 'Navigators', 'Trailblazers'][offset % 4],
+        },
+      })),
+    ),
     ...[
-      'Implementation roadmap',
-      'Pricing strategy',
-      'Implementation roadmap',
-      'Customer onboarding',
-      'AI governance',
-    ].map((value) => ({
-      interactionId: poll.id,
+      { interactionId: ideaImprove.id, selections: ['Productivity', 'Customer experience'], team: 'Catalysts' },
+      { interactionId: ideaBenefit.id, selections: ['Employees'], team: 'Builders' },
+      { interactionId: ideaEase.id, selections: ['Moderate'], team: 'Builders' },
+      { interactionId: opportunityFrequency.id, selections: ['Weekly'], team: 'Navigators' },
+      { interactionId: opportunityImpact.id, selections: ['Save time'], team: 'Navigators' },
+      { interactionId: concernTheme.id, selections: ['Data security'], team: 'Trailblazers' },
+    ].map((item, index) => ({
+      interactionId: item.interactionId,
       responseType: 'poll' as const,
       moderationState: 'visible' as const,
-      content: { selections: [value] },
+      content: {
+        selections: item.selections,
+        attendeeKey: `demo-poll-${index}`,
+        nickname: `DemoPoll${index}`,
+        team: item.team,
+      },
     })),
-    ...[
-      'Like',
-      'Excited',
-      'Interesting',
-      'Agree',
-      'Like',
-      'Confused',
-      'Interesting',
-      'Excited',
-    ].map((value) => ({
-      interactionId: reactions.id,
-      responseType: 'reaction' as const,
+    ...[0, 1, 2].map((_, index) => ({
+      interactionId: concernLevel.id,
+      responseType: 'rating' as const,
       moderationState: 'visible' as const,
-      content: { value },
+      content: {
+        value: Math.min(4, index + 2),
+        attendeeKey: `demo-concern-rating-${index}`,
+        nickname: `ConcernDemo${index}`,
+        team: ['Catalysts', 'Builders', 'Trailblazers'][index],
+      },
     })),
   ]
 

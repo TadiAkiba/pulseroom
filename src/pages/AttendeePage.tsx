@@ -99,6 +99,22 @@ function getEventTeams(snapshot: EventSnapshot | null) {
   return teams.length > 0 ? teams : ['Catalysts', 'Builders', 'Navigators', 'Trailblazers']
 }
 
+function getInteractionFormKey(interaction: InteractionRecord) {
+  return typeof interaction.settings.formKey === 'string' ? interaction.settings.formKey : interaction.type
+}
+
+function getInteractionFormTitle(interaction: InteractionRecord) {
+  return typeof interaction.settings.formTitle === 'string'
+    ? interaction.settings.formTitle
+    : interaction.type === 'feedback'
+      ? 'AI Idea'
+      : interaction.type === 'poll'
+        ? 'AI Opportunity'
+        : interaction.type === 'question'
+          ? 'Questions'
+          : 'AI Townhall'
+}
+
 export function AttendeePage() {
   const { code = '' } = useParams()
   const initialProfile = getStoredProfile(code)
@@ -276,9 +292,9 @@ export function AttendeePage() {
 
   const quickActions = useMemo(
     () => [
-      { label: 'Share ideas', type: 'feedback' as const, copy: 'Ideas, fears, and opportunities from the room.' },
-      { label: 'Live polls', type: 'poll' as const, copy: 'Vote on what the townhall should do next.' },
-      { label: 'Ask a question', type: 'question' as const, copy: 'Send anonymous questions for leadership to answer.' },
+      { key: 'idea', label: 'AI Idea', copy: 'Share your idea and the value it could unlock.' },
+      { key: 'opportunity', label: 'AI Opportunity', copy: 'Spot where AI could solve a repeated business problem.' },
+      { key: 'concern', label: 'AI Concern', copy: 'Capture what feels risky and what would build trust.' },
     ],
     [],
   )
@@ -432,9 +448,13 @@ export function AttendeePage() {
         <>
           <section className="townhall-actions">
             {quickActions.map((action) => {
-              const interactionIndex = data.interactions.findIndex((interaction) => interaction.type === action.type)
+              const matchingInteractions = data.interactions
+                .map((interaction, index) => ({ interaction, index }))
+                .filter(({ interaction }) => getInteractionFormKey(interaction) === action.key)
+              const nextUnanswered = matchingInteractions.find(({ interaction }) => !submittedByInteraction[interaction.id])
+              const interactionIndex = nextUnanswered?.index ?? matchingInteractions[0]?.index ?? -1
               return (
-                <Card key={action.type} className="townhall-card">
+                <Card key={action.key} className="townhall-card">
                   <span className="eyebrow">{action.label}</span>
                   <h3>{action.copy}</h3>
                   <Button
@@ -608,6 +628,12 @@ function InteractionCard({
   onSubmit: (payload: Record<string, unknown>) => void
 }) {
   const [selected, setSelected] = useState<string[]>([])
+  const formTitle = getInteractionFormTitle(interaction)
+  const formDescription = typeof interaction.settings.formDescription === 'string' ? interaction.settings.formDescription : ''
+  const helperText = typeof interaction.settings.helperText === 'string' ? interaction.settings.helperText : ''
+  const questionNumber = Number(interaction.settings.questionNumber)
+  const questionCount = Number(interaction.settings.questionCount)
+  const points = Number(interaction.settings.points)
 
   function renderNavigation() {
     return (
@@ -632,15 +658,9 @@ function InteractionCard({
   }
 
   const eyebrow =
-    interaction.type === 'question'
-      ? 'Ask a question'
-      : interaction.type === 'feedback'
-        ? 'Share an idea'
-        : interaction.type === 'poll'
-          ? 'Live poll'
-          : interaction.type === 'rating'
-            ? 'Rate the townhall'
-            : 'React live'
+    Number.isFinite(questionNumber) && Number.isFinite(questionCount)
+      ? `${formTitle} · Question ${questionNumber} of ${questionCount}`
+      : formTitle
 
   if (interaction.type === 'question' || interaction.type === 'feedback') {
     return (
@@ -656,12 +676,13 @@ function InteractionCard({
         </div>
         <span className="eyebrow">{eyebrow}</span>
         <h2>{interaction.prompt}</h2>
+        {formDescription ? <p className="muted">{formDescription}</p> : null}
         <p className="prompt-helper">
-          {nextMilestone ? `Answer this to get closer to the ${nextMilestone}-contribution unlock.` : 'You have already unlocked every session milestone.'}
+          {helperText || (nextMilestone ? `Answer this to get closer to the ${nextMilestone}-contribution unlock.` : 'You have already unlocked every session milestone.')}
         </p>
         <form onSubmit={submitText}>
           <Textarea value={value} onChange={(event) => onChange(event.target.value)} rows={4} maxLength={400} />
-          <Button type="submit">Submit</Button>
+          <Button type="submit">{points === 10 ? 'Submit and earn 10 points' : 'Submit'}</Button>
         </form>
         {renderNavigation()}
       </Card>
@@ -683,15 +704,20 @@ function InteractionCard({
         </div>
         <span className="eyebrow">{eyebrow}</span>
         <h2>{interaction.prompt}</h2>
+        {formDescription ? <p className="muted">{formDescription}</p> : null}
         <p className="prompt-helper">
-          {nextMilestone ? `Quick ratings help unlock the ${nextMilestone}-contribution milestone.` : 'Every session milestone is already unlocked.'}
+          {helperText || (nextMilestone ? `Quick ratings help unlock the ${nextMilestone}-contribution milestone.` : 'Every session milestone is already unlocked.')}
         </p>
         <div className="choice-grid">
-          {Array.from({ length: scale }, (_, index) => index + 1).map((item) => (
-            <Button key={item} type="button" variant="secondary" className="choice-pill" onClick={() => onSubmit({ value: item })}>
-              {item}
-            </Button>
-          ))}
+          {Array.from({ length: scale }, (_, index) => index + 1).map((item) => {
+            const labels = Array.isArray(interaction.settings.labels) ? interaction.settings.labels.map(String) : []
+            const label = labels[item - 1]
+            return (
+              <Button key={item} type="button" variant="secondary" className="choice-pill" onClick={() => onSubmit({ value: item })}>
+                {label ? `${item}. ${label}` : item}
+              </Button>
+            )
+          })}
         </div>
         {renderNavigation()}
       </Card>
@@ -723,8 +749,9 @@ function InteractionCard({
         </div>
         <span className="eyebrow">{eyebrow}</span>
         <h2>{interaction.prompt}</h2>
+        {formDescription ? <p className="muted">{formDescription}</p> : null}
         <p className="prompt-helper">
-          {nextMilestone ? `Cast your vote to move toward the ${nextMilestone}-contribution unlock.` : 'Your milestone track is already complete.'}
+          {helperText || (nextMilestone ? `Cast your vote to move toward the ${nextMilestone}-contribution unlock.` : 'Your milestone track is already complete.')}
         </p>
         <div className="choice-grid">
           {interaction.options.map((option) => (
@@ -767,8 +794,9 @@ function InteractionCard({
       </div>
       <span className="eyebrow">{eyebrow}</span>
       <h2>{interaction.prompt}</h2>
+      {formDescription ? <p className="muted">{formDescription}</p> : null}
       <p className="prompt-helper">
-        {nextMilestone ? `Fire a reaction to push toward the ${nextMilestone}-contribution unlock.` : 'You have already cleared the milestone track.'}
+        {helperText || (nextMilestone ? `Fire a reaction to push toward the ${nextMilestone}-contribution unlock.` : 'You have already cleared the milestone track.')}
       </p>
       <div className="reaction-grid">
         {interaction.options.map((option) => (

@@ -247,37 +247,238 @@ function createDefaultInteractions(eventId: string) {
   return [
     createInteraction({
       eventId,
-      type: 'question',
-      prompt: 'What question should leadership answer live?',
+      type: 'feedback',
+      prompt: 'What is your AI idea?',
+      settings: {
+        formKey: 'idea',
+        formTitle: 'AI Idea',
+        formDescription: 'Tell us in your own words.',
+        questionNumber: 1,
+        questionCount: 5,
+        points: 10,
+        feedEligible: true,
+      },
       ordering: 1,
     }),
     createInteraction({
       eventId,
-      type: 'feedback',
-      prompt: 'Share one idea, fear, or opportunity the room should discuss.',
+      type: 'poll',
+      prompt: 'What would this improve?',
+      options: [
+        'Customer experience',
+        'Employee experience',
+        'Productivity',
+        'Cost / efficiency',
+        'Decision-making',
+        'Revenue / growth',
+        'Risk / compliance',
+        'Something else',
+      ],
+      settings: {
+        formKey: 'idea',
+        formTitle: 'AI Idea',
+        questionNumber: 2,
+        questionCount: 5,
+        allowMultiple: true,
+        points: 2,
+      },
       ordering: 2,
     }),
     createInteraction({
       eventId,
-      type: 'rating',
-      prompt: 'How valuable was this session?',
-      settings: { scale: 5 },
+      type: 'poll',
+      prompt: 'Who would benefit most?',
+      options: ['Customers', 'Employees', 'Managers', 'The business', 'Everyone'],
+      settings: {
+        formKey: 'idea',
+        formTitle: 'AI Idea',
+        questionNumber: 3,
+        questionCount: 5,
+        allowMultiple: false,
+        points: 2,
+      },
       ordering: 3,
     }),
     createInteraction({
       eventId,
-      type: 'poll',
-      prompt: 'What should we do next with AI across the business?',
-      options: ['Pilot one workflow', 'Train managers', 'Improve governance', 'Pause and reassess'],
-      settings: { allowMultiple: false },
+      type: 'rating',
+      prompt: 'How valuable do you think this could be?',
+      settings: {
+        formKey: 'idea',
+        formTitle: 'AI Idea',
+        questionNumber: 4,
+        questionCount: 5,
+        scale: 4,
+        labels: ['Low', 'Medium', 'High', 'Game-changing'],
+        points: 3,
+      },
       ordering: 4,
     }),
     createInteraction({
       eventId,
-      type: 'reaction',
-      prompt: 'React to the session in real time',
-      options: ['Like', 'Interesting', 'Confused', 'Agree', 'Disagree', 'Excited'],
+      type: 'poll',
+      prompt: 'How easy do you think it would be to implement?',
+      options: ['Easy', 'Moderate', 'Difficult', 'Not sure'],
+      settings: {
+        formKey: 'idea',
+        formTitle: 'AI Idea',
+        questionNumber: 5,
+        questionCount: 5,
+        allowMultiple: false,
+        points: 2,
+      },
       ordering: 5,
+    }),
+    createInteraction({
+      eventId,
+      type: 'feedback',
+      prompt: 'Where do you see an opportunity for AI?',
+      settings: {
+        formKey: 'opportunity',
+        formTitle: 'AI Opportunity',
+        questionNumber: 1,
+        questionCount: 5,
+        feedEligible: true,
+        points: 8,
+      },
+      ordering: 6,
+    }),
+    createInteraction({
+      eventId,
+      type: 'feedback',
+      prompt: 'What problem could AI solve?',
+      settings: {
+        formKey: 'opportunity',
+        formTitle: 'AI Opportunity',
+        questionNumber: 2,
+        questionCount: 5,
+        feedEligible: true,
+        points: 6,
+      },
+      ordering: 7,
+    }),
+    createInteraction({
+      eventId,
+      type: 'poll',
+      prompt: 'How often does this problem occur?',
+      options: ['Daily', 'Weekly', 'Monthly', 'Occasionally'],
+      settings: {
+        formKey: 'opportunity',
+        formTitle: 'AI Opportunity',
+        questionNumber: 3,
+        questionCount: 5,
+        allowMultiple: false,
+        points: 2,
+      },
+      ordering: 8,
+    }),
+    createInteraction({
+      eventId,
+      type: 'poll',
+      prompt: 'What would the impact be?',
+      options: [
+        'Save time',
+        'Reduce costs',
+        'Improve quality',
+        'Improve customer experience',
+        'Increase revenue',
+        'Reduce risk',
+        'Other',
+      ],
+      settings: {
+        formKey: 'opportunity',
+        formTitle: 'AI Opportunity',
+        questionNumber: 4,
+        questionCount: 5,
+        allowMultiple: false,
+        points: 2,
+      },
+      ordering: 9,
+    }),
+    createInteraction({
+      eventId,
+      type: 'rating',
+      prompt: 'How excited are you about this opportunity?',
+      settings: {
+        formKey: 'opportunity',
+        formTitle: 'AI Opportunity',
+        questionNumber: 5,
+        questionCount: 5,
+        scale: 4,
+        labels: ['Not yet', 'Curious', 'Excited', 'Very excited'],
+        points: 2,
+      },
+      ordering: 10,
+    }),
+    createInteraction({
+      eventId,
+      type: 'poll',
+      prompt: 'What concerns you most about AI?',
+      options: [
+        'Job security',
+        'Privacy',
+        'Data security',
+        'Incorrect information',
+        'Bias / unfair decisions',
+        'Loss of human interaction',
+        'Lack of understanding',
+        'Too much change',
+        'Something else',
+      ],
+      settings: {
+        formKey: 'concern',
+        formTitle: 'AI Concern',
+        formDescription: 'There are no wrong answers. Your response is anonymous.',
+        questionNumber: 1,
+        questionCount: 4,
+        allowMultiple: false,
+        points: 3,
+      },
+      ordering: 11,
+    }),
+    createInteraction({
+      eventId,
+      type: 'feedback',
+      prompt: 'Tell us more.',
+      settings: {
+        formKey: 'concern',
+        formTitle: 'AI Concern',
+        questionNumber: 2,
+        questionCount: 4,
+        feedEligible: false,
+        points: 4,
+      },
+      ordering: 12,
+    }),
+    createInteraction({
+      eventId,
+      type: 'rating',
+      prompt: 'How concerned are you?',
+      settings: {
+        formKey: 'concern',
+        formTitle: 'AI Concern',
+        questionNumber: 3,
+        questionCount: 4,
+        scale: 4,
+        labels: ['Not concerned', 'Slightly concerned', 'Concerned', 'Very concerned'],
+        points: 2,
+      },
+      ordering: 13,
+    }),
+    createInteraction({
+      eventId,
+      type: 'feedback',
+      prompt: 'What would make you feel more comfortable with AI?',
+      settings: {
+        formKey: 'concern',
+        formTitle: 'AI Concern',
+        questionNumber: 4,
+        questionCount: 4,
+        feedEligible: false,
+        helperText: 'This is especially useful because it turns fear into action.',
+        points: 6,
+      },
+      ordering: 14,
     }),
   ]
 }
@@ -360,7 +561,13 @@ function buildEventSnapshot(eventId: string, includeHidden: boolean) {
     }))
 
   const ideaFeed = responsesForView
-    .filter((response) => response.responseType === 'feedback')
+    .filter((response) => {
+      if (response.responseType !== 'feedback') {
+        return false
+      }
+      const interaction = interactionById.get(response.interactionId)
+      return interaction?.settings.feedEligible !== false
+    })
     .map((response) => {
       const attendee = getAttendeeMeta(response.content)
       const voteSummary = voteSummaryByResponseId.get(response.id) ?? { up: 0, down: 0, score: 0 }
@@ -394,7 +601,7 @@ function buildEventSnapshot(eventId: string, includeHidden: boolean) {
     ]),
   )
   const uniqueParticipants = new Set<string>()
-  const responsePoints: Record<InteractionType, number> = {
+  const defaultResponsePoints: Record<InteractionType, number> = {
     question: 5,
     feedback: 6,
     poll: 3,
@@ -420,14 +627,18 @@ function buildEventSnapshot(eventId: string, includeHidden: boolean) {
     }
     team.contributors.add(attendee.attendeeKey)
     team.contributions += 1
-    team.points += responsePoints[response.responseType] ?? 1
+    const interaction = interactionById.get(response.interactionId)
+    const configuredPoints = Number(interaction?.settings.points)
+    team.points += Number.isFinite(configuredPoints) ? configuredPoints : defaultResponsePoints[response.responseType] ?? 1
 
     if (response.responseType === 'feedback') {
-      team.ideas += 1
-      const voteSummary = voteSummaryByResponseId.get(response.id) ?? { up: 0, down: 0, score: 0 }
-      team.votesReceived += voteSummary.up
-      team.points += voteSummary.up * 2
-      team.points -= voteSummary.down
+      if (interaction?.settings.feedEligible !== false) {
+        team.ideas += 1
+        const voteSummary = voteSummaryByResponseId.get(response.id) ?? { up: 0, down: 0, score: 0 }
+        team.votesReceived += voteSummary.up
+        team.points += voteSummary.up * 2
+        team.points -= voteSummary.down
+      }
     }
 
     if (response.responseType === 'question') {

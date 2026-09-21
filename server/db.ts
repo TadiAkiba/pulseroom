@@ -323,6 +323,16 @@ export function createOrganizer(input: { email: string; passwordHash: string }) 
   return organizer
 }
 
+export function updateOrganizerPassword(id: string, passwordHash: string) {
+  db.prepare('UPDATE organizers SET password_hash = ? WHERE id = ?').run(passwordHash, id)
+  return getOrganizerById(id)
+}
+
+export function getOrganizerById(id: string) {
+  const row = db.prepare('SELECT * FROM organizers WHERE id = ?').get(id) as RawRow | undefined
+  return row ? rowToOrganizer(row) : null
+}
+
 export function createOrganizerSession(organizerId: string) {
   const session: OrganizerSessionRecord = {
     id: randomUUID(),

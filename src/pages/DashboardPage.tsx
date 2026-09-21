@@ -110,21 +110,19 @@ export function DashboardPage() {
           <p>
             {session.canRegister
               ? 'Organizer accounts are stored securely and sessions survive restarts.'
-              : 'Use the organizer credentials configured for this deployment.'}
+              : 'Open organizer sign up is currently closed. Use the credentials set up for this deployment, or enable ALLOW_ORGANIZER_SIGNUP to create additional accounts.'}
           </p>
 
-          {session.canRegister ? (
-            <Tabs>
-              <TabsList className="auth-tabs">
-                <TabsTrigger active={mode === 'login'} onClick={() => setMode('login')}>
-                  Sign in
-                </TabsTrigger>
-                <TabsTrigger active={mode === 'register'} onClick={() => setMode('register')}>
-                  Create account
-                </TabsTrigger>
-              </TabsList>
-            </Tabs>
-          ) : null}
+          <Tabs>
+            <TabsList className="auth-tabs">
+              <TabsTrigger active={mode === 'login'} onClick={() => setMode('login')}>
+                Sign in
+              </TabsTrigger>
+              <TabsTrigger active={mode === 'register'} onClick={() => setMode('register')}>
+                Create account
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
 
           <form onSubmit={handleAuth} className="stack-form">
             <Field label="Email">

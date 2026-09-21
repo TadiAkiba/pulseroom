@@ -51,10 +51,10 @@ const lastSubmissionByKey = new Map<string, number>()
 let convexSyncWarned = false
 
 initializeDatabase()
-bootstrapOrganizer()
+reportAuthState()
 
 if (config.enableDemoSeed) {
-  ensureDemoEvent(getOrganizerByEmail(config.bootstrapOrganizerEmail)?.id)
+  ensureDemoEvent(undefined)
 }
 
 const app = express()
@@ -145,24 +145,22 @@ function getActivePollInteractionId(event: { config: Record<string, unknown> }) 
   return typeof event.config.activePollInteractionId === 'string' ? event.config.activePollInteractionId : null
 }
 
-function bootstrapOrganizer() {
-  const email = config.bootstrapOrganizerEmail
-  const password = config.bootstrapOrganizerPassword
+function reportAuthState() {
+  const total = countOrganizers()
+  const signupAllowed = canRegisterOrganizer()
+  const why = config.allowOrganizerSignup
+    ? 'ALLOW_ORGANIZER_SIGNUP is enabled'
+    : total === 0
+      ? 'no organizers exist yet (first account is always unlocked)'
+      : 'ALLOW_ORGANIZER_SIGNUP is disabled and organizers already exist'
 
-  if (!email && !password) {
-    return
-  }
-
-  if (!email || !password) {
-    console.warn('Bootstrap organizer credentials are incomplete. Skipping bootstrap organizer creation.')
-    return
-  }
-
-  if (!getOrganizerByEmail(email)) {
-    createOrganizer({
-      email,
-      passwordHash: hashPassword(password),
-    })
+  console.log(
+    `Auth: ${total} organizer(s) registered. Signup ${signupAllowed ? 'OPEN' : 'CLOSED'} — ${why}.`,
+  )
+  if (total === 0) {
+    console.log(
+      'Tip: on first run, visit the dashboard to create your initial organizer account from the UI.',
+    )
   }
 }
 
@@ -922,7 +920,13 @@ app.get('/api/auth/session', (req, res) => {
 
 app.post('/api/auth/register', (req, res) => {
   if (!canRegisterOrganizer()) {
-    res.status(403).json({ error: 'Organizer signup is disabled for this deployment.' })
+    const total = countOrganizers()
+    const hint = total === 0
+      ? ''
+      : ' Set ALLOW_ORGANIZER_SIGNUP=true in the deployment environment to allow additional organizer accounts.'
+    res.status(403).json({
+      error: `Organizer signup is disabled for this deployment.${hint}`,
+    })
     return
   }
 

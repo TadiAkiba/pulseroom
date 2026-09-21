@@ -72,10 +72,8 @@ export const config = {
   ),
   allowOrganizerSignup: parseBoolean(
     process.env.ALLOW_ORGANIZER_SIGNUP,
-    nodeEnv !== 'production',
+    true,
   ),
-  bootstrapOrganizerEmail: process.env.BOOTSTRAP_ORGANIZER_EMAIL?.trim().toLowerCase() || '',
-  bootstrapOrganizerPassword: process.env.BOOTSTRAP_ORGANIZER_PASSWORD?.trim() || '',
   analysisProvider: process.env.ANALYSIS_PROVIDER?.trim() || 'heuristic',
   convexUrl,
   convexHttpActionsUrl,

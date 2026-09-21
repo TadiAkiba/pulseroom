@@ -84,6 +84,14 @@ if (config.enableConvexPublicSync) {
 
 scheduleStaleConvexRetries()
 
+const cookieSameSite = config.usesCrossSiteCookies ? 'none' : 'lax'
+const cookieSecure = config.isProduction || config.usesCrossSiteCookies
+console.log(
+  `HTTP: env=${config.nodeEnv} port=${config.port} app=${config.appUrl} frontend=${config.frontendUrl || '(same-origin)'} ` +
+  `crossSiteCookies=${config.usesCrossSiteCookies} cookie.sameSite=${cookieSameSite} cookie.secure=${cookieSecure} ` +
+  `allowedOrigins=[${config.allowedOrigins.join(', ') || '*'}]`,
+)
+
 const app = express()
 const server = http.createServer(app)
 const io = new Server(server, {
@@ -281,6 +289,7 @@ function getOrganizerFromRequest(req: express.Request) {
 
 function setSessionCookie(res: express.Response, sessionId: string) {
   res.cookie('organizer_session', sessionId, {
+    path: '/',
     httpOnly: true,
     sameSite: config.usesCrossSiteCookies ? 'none' : 'lax',
     secure: config.isProduction || config.usesCrossSiteCookies,
@@ -290,6 +299,7 @@ function setSessionCookie(res: express.Response, sessionId: string) {
 
 function clearSessionCookie(res: express.Response) {
   res.clearCookie('organizer_session', {
+    path: '/',
     httpOnly: true,
     sameSite: config.usesCrossSiteCookies ? 'none' : 'lax',
     secure: config.isProduction || config.usesCrossSiteCookies,
@@ -313,8 +323,23 @@ function requireOrganizer(
   res: express.Response,
   next: express.NextFunction,
 ) {
-  const lookup = getOrganizerFromRequest(req)
+  const sessionId = typeof req.cookies.organizer_session === 'string' ? req.cookies.organizer_session : ''
+  if (!sessionId) {
+    console.warn(
+      `[auth] 401 ${req.method} ${req.path} — no organizer_session cookie. ` +
+      `origin=${req.get('origin') || 'n/a'} cookie=${req.get('cookie') ? 'present (other keys)' : 'absent entirely'} — ` +
+      `check FRONTEND_URL + APP_URL match sameSite/secure and that credentials: 'include' is used on the client.`,
+    )
+    res.status(401).json({ error: 'Organizer session required.' })
+    return
+  }
+
+  const lookup = getOrganizerSession(sessionId)
   if (!lookup) {
+    console.warn(
+      `[auth] 401 ${req.method} ${req.path} — invalid or expired organizer_session ` +
+      `(${sessionId.slice(0, 8)}…). origin=${req.get('origin') || 'n/a'}`,
+    )
     res.status(401).json({ error: 'Organizer session required.' })
     return
   }
@@ -875,11 +900,53 @@ function buildEventSnapshot(eventId: string, includeHidden: boolean) {
 
 async function verifyConvexReachability() {
   try {
-    const url = new URL('/', config.convexHttpActionsUrl.endsWith('/') ? config.convexHttpActionsUrl : `${config.convexHttpActionsUrl}/`)
-    const r = await fetch(url, { method: 'GET' }).catch(() => ({ ok: false })) as Response
-    if (!r.ok) {
-      throw new Error(`Received non-success response (${String(r.status || 'no status')}).`)
+    const base = config.convexHttpActionsUrl.endsWith('/')
+      ? config.convexHttpActionsUrl
+      : `${config.convexHttpActionsUrl}/`
+    const healthUrl = new URL('/health', base)
+    const syncUrl = new URL('/sync-snapshot', base)
+
+    const healthResp = await fetch(healthUrl, { method: 'GET' })
+      .catch(() => ({ ok: false, status: 0, text: async () => '' })) as Response
+    if (!healthResp.ok) {
+      const detail = await healthResp.text().catch(() => '')
+      throw new Error(
+        `Health endpoint returned ${String(healthResp.status || 'no status')}. ` +
+        `If this persists, run \`npx convex deploy\` to push the HTTP routes to Convex. ` +
+        `Body: ${detail.slice(0, 120)}`,
+      )
     }
+
+    const probeResp = await fetch(syncUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-pulseroom-sync-secret': config.convexSyncSecret,
+      },
+      body: JSON.stringify({}),
+    }).catch(() => ({ ok: false, status: 0, text: async () => '' })) as Response
+
+    const probeStatus = probeResp.status
+    const probeBody = await probeResp.text().catch(() => '')
+
+    if (probeStatus === 404) {
+      throw new Error(
+        `The /sync-snapshot route is not yet deployed on Convex (got 404). ` +
+        `Run: npx convex login && npx convex deploy --message "Add sync-snapshot route"`,
+      )
+    }
+    if (probeStatus === 500 && probeBody.includes('Sync secret is not configured')) {
+      throw new Error(
+        `CONVEX_SYNC_SECRET is not set on the Convex deployment. ` +
+        `Add it via the Convex dashboard → Settings → Environment Variables, then re-deploy.`,
+      )
+    }
+    if (![400, 401, 200].includes(probeStatus)) {
+      throw new Error(
+        `Unexpected probe response from /sync-snapshot: ${probeStatus}. Body: ${probeBody.slice(0, 120)}`,
+      )
+    }
+
     console.log('Convex connectivity check passed.')
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error.'

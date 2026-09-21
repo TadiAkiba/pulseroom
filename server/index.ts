@@ -28,11 +28,15 @@ import {
   getResponse,
   initializeDatabase,
   listAnalyses,
+  listConvexSyncFailures,
   listEvents,
   listEventsForOrganizer,
   listInteractions,
   listResponses,
   listResponseVotes,
+  markConvexSyncFailure,
+  markConvexSyncSuccess,
+  touchConvexSyncState,
   type InteractionType,
   type OrganizerRecord,
   upsertResponseVote,
@@ -49,6 +53,15 @@ type OrganizerRequest = express.Request & {
 const rateLimitWindowMs = 2000
 const lastSubmissionByKey = new Map<string, number>()
 let convexSyncWarned = false
+const convexRetryTimers = new Map<string, ReturnType<typeof setTimeout>>()
+const CONVEX_MIN_RETRY_MS = 1_000
+const CONVEX_MAX_RETRY_MS = 5 * 60 * 1000
+
+function convexBackoffMs(tries: number) {
+  const jitter = Math.random() * 0.3 + 0.85
+  const base = Math.min(CONVEX_MAX_RETRY_MS, CONVEX_MIN_RETRY_MS * 2 ** Math.max(0, tries - 1))
+  return Math.round(base * jitter)
+}
 
 initializeDatabase()
 reportAuthState()
@@ -56,6 +69,17 @@ reportAuthState()
 if (config.enableDemoSeed) {
   ensureDemoEvent(undefined)
 }
+
+if (config.enableConvexPublicSync) {
+  console.log(
+    `Convex sync enabled → endpoint=${config.convexHttpActionsUrl} clientUrl=${config.convexUrl}`,
+  )
+  void verifyConvexReachability()
+} else {
+  console.log('Convex sync disabled.')
+}
+
+scheduleStaleConvexRetries()
 
 const app = express()
 const server = http.createServer(app)
@@ -791,45 +815,97 @@ function buildEventSnapshot(eventId: string, includeHidden: boolean) {
   }
 }
 
-async function syncEventToConvex(
-  adminSnapshot: NonNullable<ReturnType<typeof buildEventSnapshot>>,
-  publicSnapshot: NonNullable<ReturnType<typeof buildEventSnapshot>>,
-) {
-  if (!config.enableConvexPublicSync || !config.convexHttpActionsUrl) {
+async function verifyConvexReachability() {
+  try {
+    const url = new URL('/', config.convexHttpActionsUrl.endsWith('/') ? config.convexHttpActionsUrl : `${config.convexHttpActionsUrl}/`)
+    const r = await fetch(url, { method: 'GET' }).catch(() => ({ ok: false })) as Response
+    if (!r.ok) {
+      throw new Error(`Received non-success response (${String(r.status || 'no status')}).`)
+    }
+    console.log('Convex connectivity check passed.')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown error.'
+    console.warn(`Convex connectivity check failed — sync will retry in the background. Detail: ${message}`)
+  }
+}
+
+function scheduleConvexRetry(eventId: string, tries: number) {
+  if (convexRetryTimers.has(eventId)) {
+    return
+  }
+  const delayMs = convexBackoffMs(tries)
+  const timer = setTimeout(() => {
+    convexRetryTimers.delete(eventId)
+    void broadcastEvent(eventId)
+  }, delayMs)
+  convexRetryTimers.set(eventId, timer)
+}
+
+function scheduleStaleConvexRetries() {
+  const pending = listConvexSyncFailures()
+  if (pending.length === 0) return
+  const now = Date.now()
+  for (const state of pending) {
+    const dueAtMs = new Date(state.nextRetryAt).getTime()
+    const waitMs = Math.max(0, dueAtMs - now)
+    console.log(
+      `Convex pending retry: event=${state.eventId} tries=${state.tries} lastError=${state.lastError ?? 'n/a'} retryInMs=${waitMs}`,
+    )
+    const timer = setTimeout(() => {
+      convexRetryTimers.delete(state.eventId)
+      void broadcastEvent(state.eventId)
+    }, waitMs)
+    convexRetryTimers.set(state.eventId, timer)
+  }
+}
+
+async function syncEventToConvex(publicSnapshot: NonNullable<ReturnType<typeof buildEventSnapshot>>) {
+  if (!config.enableConvexPublicSync || !config.convexHttpActionsUrl || !config.convexSyncSecret) {
     return
   }
 
   const endpoint = new URL('/sync-snapshot', config.convexHttpActionsUrl.endsWith('/') ? config.convexHttpActionsUrl : `${config.convexHttpActionsUrl}/`)
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
+    'x-pulseroom-sync-secret': config.convexSyncSecret,
   }
+  const updatedAt = new Date().toISOString()
+  const eventId = publicSnapshot.event.id
 
-  if (config.convexSyncSecret) {
-    headers['x-pulseroom-sync-secret'] = config.convexSyncSecret
-  }
+  touchConvexSyncState(eventId, updatedAt)
 
   try {
     const response = await fetch(endpoint, {
       method: 'POST',
       headers,
       body: JSON.stringify({
-        eventId: adminSnapshot.event.id,
-        code: adminSnapshot.event.code,
-        adminSnapshot,
+        eventId,
+        code: publicSnapshot.event.code,
         publicSnapshot,
-        updatedAt: new Date().toISOString(),
+        updatedAt,
       }),
     })
 
     if (!response.ok) {
-      throw new Error(`Convex sync returned ${response.status}.`)
+      const body = await response.text().catch(() => '')
+      throw new Error(`Convex sync returned ${response.status}: ${body.slice(0, 200)}`)
+    }
+
+    markConvexSyncSuccess(eventId)
+    if (convexSyncWarned) {
+      convexSyncWarned = false
+      console.log(`Convex sync recovered for event ${eventId}.`)
     }
   } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown sync failure.'
+    const nextRetryAt = new Date(Date.now() + convexBackoffMs(0)).toISOString()
+    markConvexSyncFailure(eventId, message, nextRetryAt)
     if (!convexSyncWarned) {
-      const message = error instanceof Error ? error.message : 'Unknown sync failure.'
-      console.warn(`Convex sync is enabled but could not push snapshots: ${message}`)
+      console.warn(`Convex sync failed for event ${eventId}: ${message}. Will retry in background.`)
       convexSyncWarned = true
     }
+    const pending = listConvexSyncFailures().find((s) => s.eventId === eventId)
+    scheduleConvexRetry(eventId, pending?.tries ?? 1)
   }
 }
 
@@ -842,7 +918,7 @@ async function broadcastEvent(eventId: string) {
 
   io.to(`event:${eventId}:admin`).emit('event:update-admin', admin)
   io.to(`event:${eventId}:public`).emit('event:update-public', publicView)
-  void syncEventToConvex(admin, publicView)
+  void syncEventToConvex(publicView)
 }
 
 function queueAnalysis(eventId: string, responseId: string, text: string) {
@@ -892,14 +968,15 @@ if (config.enableConvexPublicSync) {
 }
 
 app.get('/api/health', (_req, res) => {
+  const pending = listConvexSyncFailures().length
   res.json({
     ok: true,
     mode: config.nodeEnv,
     analysisProvider: config.analysisProvider,
     convex: {
       enabled: config.enableConvexPublicSync,
-      urlConfigured: Boolean(config.convexUrl),
-      httpActionsConfigured: Boolean(config.convexHttpActionsUrl),
+      url: config.enableConvexPublicSync ? config.convexUrl : null,
+      pendingFailures: pending,
     },
   })
 })
@@ -1178,6 +1255,10 @@ app.get('/api/events/code/:code', (req, res) => {
       notice:
         'Responses stay anonymous. The app stores your chosen nickname, team, submissions, vote activity, timestamps, moderation state, and derived analysis for this room, but does not collect names, emails, or attendee accounts.',
     },
+    convex: {
+      enabled: config.enableConvexPublicSync,
+      url: config.enableConvexPublicSync ? config.convexUrl : null,
+    },
   })
 })
 
@@ -1189,7 +1270,13 @@ app.get('/api/events/code/:code/presenter', (req, res) => {
   }
 
   const snapshot = buildEventSnapshot(event.id, false)
-  res.json(snapshot)
+  res.json({
+    snapshot,
+    convex: {
+      enabled: config.enableConvexPublicSync,
+      url: config.enableConvexPublicSync ? config.convexUrl : null,
+    },
+  })
 })
 
 app.post('/api/events/code/:code/responses', (req, res) => {

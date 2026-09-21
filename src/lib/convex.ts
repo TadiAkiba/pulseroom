@@ -2,10 +2,43 @@ import { ConvexReactClient } from 'convex/react'
 import { api as convexApi } from '../../convex/_generated/api'
 
 const fallbackConvexUrl = 'https://charming-shrimp-707.convex.cloud'
+const buildTimeUrl = (import.meta.env.VITE_CONVEX_URL as string | undefined)?.trim()
+const buildTimeEnabled = import.meta.env.VITE_ENABLE_CONVEX_PUBLIC_SYNC === 'true'
 
-export const convexUrl = import.meta.env.VITE_CONVEX_URL?.trim() || fallbackConvexUrl
-export const convexPublicSyncEnabled = import.meta.env.VITE_ENABLE_CONVEX_PUBLIC_SYNC === 'true'
-export const convexClient = new ConvexReactClient(convexUrl)
+let runtimeOverrides: { enabled: boolean; url: string | null } | null = null
+
+export function setConvexRuntimeConfig(overrides: { enabled: boolean; url: string | null }) {
+  runtimeOverrides = overrides
+}
+
+function getEnabled() {
+  if (runtimeOverrides) return runtimeOverrides.enabled
+  return buildTimeEnabled
+}
+
+function getUrl() {
+  if (runtimeOverrides && runtimeOverrides.url) return runtimeOverrides.url
+  return buildTimeUrl || fallbackConvexUrl
+}
+
+let cachedClient: ConvexReactClient | null = null
+let lastCachedUrl: string | null = null
+
+export function getConvexClient(): ConvexReactClient | null {
+  if (!getEnabled()) return null
+  const url = getUrl()
+  if (cachedClient && lastCachedUrl === url) {
+    return cachedClient
+  }
+  cachedClient = new ConvexReactClient(url)
+  lastCachedUrl = url
+  return cachedClient
+}
+
+export const convexPublicSyncEnabled = {
+  enabled: getEnabled,
+  url: getUrl,
+}
 
 export const convexQueries = {
   getPublicByCode: convexApi.snapshots.getPublicByCode,

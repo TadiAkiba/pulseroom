@@ -8,18 +8,23 @@ http.route({
   path: '/sync-snapshot',
   method: 'POST',
   handler: httpAction(async (ctx, request) => {
-    const expectedSecret = process.env.CONVEX_SYNC_SECRET?.trim()
-    const receivedSecret = request.headers.get('x-pulseroom-sync-secret')?.trim()
+    const expectedSecret = process.env.CONVEX_SYNC_SECRET?.trim() ?? ''
+    const receivedSecret = request.headers.get('x-pulseroom-sync-secret')?.trim() ?? ''
 
-    if (expectedSecret && receivedSecret !== expectedSecret) {
-      return Response.json({ error: 'Unauthorized.' }, { status: 401 })
+    if (!expectedSecret) {
+      return Response.json(
+        { error: 'Sync secret is not configured on this deployment. Set CONVEX_SYNC_SECRET and re-deploy.' },
+        { status: 500 },
+      )
+    }
+    if (receivedSecret !== expectedSecret) {
+      return Response.json({ error: 'Missing or invalid sync secret.' }, { status: 401 })
     }
 
     const body = (await request.json()) as {
       eventId?: string
       code?: string
       publicSnapshot?: unknown
-      adminSnapshot?: unknown
       updatedAt?: string
     }
 
@@ -27,8 +32,7 @@ http.route({
       typeof body.eventId !== 'string' ||
       typeof body.code !== 'string' ||
       typeof body.updatedAt !== 'string' ||
-      body.publicSnapshot === undefined ||
-      body.adminSnapshot === undefined
+      body.publicSnapshot === undefined
     ) {
       return Response.json({ error: 'Invalid payload.' }, { status: 400 })
     }
@@ -38,14 +42,6 @@ http.route({
       code: body.code,
       view: 'public',
       payload: body.publicSnapshot,
-      updatedAt: body.updatedAt,
-    })
-
-    await ctx.runMutation(internal.snapshots.syncSnapshot, {
-      eventId: body.eventId,
-      code: body.code,
-      view: 'admin',
-      payload: body.adminSnapshot,
       updatedAt: body.updatedAt,
     })
 

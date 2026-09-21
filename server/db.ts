@@ -272,6 +272,15 @@ export function initializeDatabase() {
       FOREIGN KEY (response_id) REFERENCES responses (id) ON DELETE CASCADE,
       UNIQUE(response_id, voter_key)
     );
+
+    CREATE TABLE IF NOT EXISTS convex_sync_state (
+      event_id TEXT PRIMARY KEY,
+      updated_at TEXT NOT NULL,
+      tries INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT,
+      next_retry_at TEXT NOT NULL,
+      FOREIGN KEY (event_id) REFERENCES events (id) ON DELETE CASCADE
+    );
   `)
 
   if (!hasColumn('events', 'organizer_id')) {
@@ -1012,4 +1021,55 @@ export function ensureDemoEvent(organizerId?: string) {
   }
 
   return getEventById(event.id)
+}
+
+export function touchConvexSyncState(eventId: string, updatedAt: string) {
+  db.prepare(
+    `
+      INSERT INTO convex_sync_state (event_id, updated_at, tries, last_error, next_retry_at)
+      VALUES (@eventId, @updatedAt, 0, NULL, @updatedAt)
+      ON CONFLICT(event_id) DO UPDATE SET
+        updated_at = excluded.updated_at,
+        tries = CASE WHEN convex_sync_state.tries = 0 THEN 0 ELSE convex_sync_state.tries END,
+        last_error = CASE WHEN convex_sync_state.tries = 0 THEN NULL ELSE convex_sync_state.last_error END,
+        next_retry_at = CASE WHEN convex_sync_state.tries = 0 THEN excluded.next_retry_at ELSE convex_sync_state.next_retry_at END
+    `,
+  ).run({ eventId, updatedAt })
+}
+
+export function markConvexSyncSuccess(eventId: string) {
+  db.prepare(
+    'DELETE FROM convex_sync_state WHERE event_id = ?',
+  ).run(eventId)
+}
+
+export function markConvexSyncFailure(eventId: string, error: string, nextRetryAt: string) {
+  db.prepare(
+    `
+      UPDATE convex_sync_state
+      SET tries = tries + 1,
+          last_error = ?,
+          next_retry_at = ?
+      WHERE event_id = ?
+    `,
+  ).run(error, nextRetryAt, eventId)
+}
+
+export function listConvexSyncFailures() {
+  const rows = db
+    .prepare('SELECT * FROM convex_sync_state WHERE tries > 0 ORDER BY next_retry_at ASC')
+    .all() as Array<{
+      event_id: string
+      updated_at: string
+      tries: number
+      last_error: string | null
+      next_retry_at: string
+    }>
+  return rows.map((row) => ({
+    eventId: row.event_id,
+    updatedAt: row.updated_at,
+    tries: Number(row.tries),
+    lastError: row.last_error,
+    nextRetryAt: row.next_retry_at,
+  }))
 }

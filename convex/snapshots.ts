@@ -33,6 +33,16 @@ export const syncSnapshot = internalMutation({
       .withIndex('by_event_view', (q) => q.eq('eventId', args.eventId).eq('view', args.view))
       .unique()
 
+    if (args.view === 'public') {
+      const staleAdmin = await ctx.db
+        .query('eventSnapshots')
+        .withIndex('by_event_view', (q) => q.eq('eventId', args.eventId).eq('view', 'admin'))
+        .unique()
+      if (staleAdmin) {
+        await ctx.db.delete(staleAdmin._id)
+      }
+    }
+
     if (existing) {
       await ctx.db.patch(existing._id, {
         code: normalizedCode,

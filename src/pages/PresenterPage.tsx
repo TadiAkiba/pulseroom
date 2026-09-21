@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useQuery } from 'convex/react'
+import { ConvexProvider, useQuery } from 'convex/react'
 import { useParams } from 'react-router-dom'
 import { io, type Socket } from 'socket.io-client'
 import {
@@ -16,7 +16,7 @@ import {
 import { Badge } from '../components/ui/Badge.tsx'
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/Tabs.tsx'
 import { api } from '../lib/api.ts'
-import { convexPublicSyncEnabled, convexQueries } from '../lib/convex.ts'
+import { convexQueries, getConvexClient, setConvexRuntimeConfig } from '../lib/convex.ts'
 import { socketUrl } from '../lib/realtime.ts'
 import type { EventSnapshot } from '../types.ts'
 
@@ -38,17 +38,32 @@ function getPresenterMomentum(totalResponses: number, reactionCount: number) {
   return { label: 'Warming up', variant: 'outline' as const }
 }
 
+function ConvexSnapshotSubscriber({
+  code,
+  onUpdate,
+}: {
+  code: string
+  onUpdate: (next: EventSnapshot | null | undefined) => void
+}) {
+  const next = useQuery(convexQueries.getPublicByCode, code ? { code } : 'skip')
+  useEffect(() => {
+    onUpdate(next as EventSnapshot | null | undefined)
+  }, [next, onUpdate])
+  return null
+}
+
 export function PresenterPage() {
   const { code = '' } = useParams()
-  const convexSnapshot = useQuery(
-    convexQueries.getPublicByCode,
-    convexPublicSyncEnabled && code ? { code } : 'skip',
-  )
+  const [convexOverride, setConvexOverride] = useState<EventSnapshot | null | undefined>(undefined)
+  const [convexEnabled, setConvexEnabled] = useState(false)
   const [snapshot, setSnapshot] = useState<EventSnapshot | null>(null)
   const [view, setView] = useState<PresenterView>('questions')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const liveSnapshot = (convexSnapshot as EventSnapshot | null | undefined) ?? snapshot
+  const convexLoaded = convexOverride !== undefined
+  const liveSnapshot = convexLoaded && convexOverride !== null
+    ? convexOverride
+    : snapshot
 
   useEffect(() => {
     let socket: Socket | undefined
@@ -56,13 +71,18 @@ export function PresenterPage() {
     api
       .getPresenterEvent(code)
       .then((response) => {
-        setSnapshot(response)
+        if (response.convex) {
+          setConvexRuntimeConfig(response.convex)
+          setConvexEnabled(Boolean(response.convex.enabled))
+          setConvexOverride(undefined)
+        }
+        setSnapshot(response.snapshot)
         setLoading(false)
         socket = io(socketUrl, {
           transports: ['websocket'],
           withCredentials: true,
         })
-        socket.emit('event:join-public', response.event.id)
+        socket.emit('event:join-public', response.snapshot.event.id)
         socket.on('event:update-public', (nextSnapshot: EventSnapshot) => {
           setSnapshot(nextSnapshot)
         })
@@ -131,8 +151,20 @@ export function PresenterPage() {
   }
 
   return (
-    <main className="presenter-shell">
-      <header className="presenter-header">
+    <>
+      {convexEnabled
+        ? (() => {
+            const client = getConvexClient()
+            if (!client) return null
+            return (
+              <ConvexProvider client={client}>
+                <ConvexSnapshotSubscriber code={code} onUpdate={setConvexOverride} />
+              </ConvexProvider>
+            )
+          })()
+        : null}
+      <main className="presenter-shell">
+        <header className="presenter-header">
         <div>
           <div className="achievement-row">
             <Badge variant="info">{liveSnapshot.event.name}</Badge>
@@ -359,5 +391,6 @@ export function PresenterPage() {
         ) : null}
       </section>
     </main>
+    </>
   )
 }

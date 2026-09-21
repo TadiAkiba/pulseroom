@@ -44,6 +44,7 @@ const nodeEnv = process.env.NODE_ENV === 'production' ? 'production' : 'developm
 const port = parseNumber(process.env.PORT, 3001)
 const convexUrl = process.env.CONVEX_URL?.trim() || process.env.VITE_CONVEX_URL?.trim() || ''
 const convexHttpActionsUrl = process.env.CONVEX_HTTP_ACTIONS_URL?.trim() || ''
+const convexSyncSecret = process.env.CONVEX_SYNC_SECRET?.trim() || ''
 const appUrl = process.env.APP_URL?.trim() || `http://localhost:${port}`
 const frontendUrl = process.env.FRONTEND_URL?.trim() || ''
 const allowedOrigins = [
@@ -77,9 +78,15 @@ export const config = {
   analysisProvider: process.env.ANALYSIS_PROVIDER?.trim() || 'heuristic',
   convexUrl,
   convexHttpActionsUrl,
-  convexSyncSecret: process.env.CONVEX_SYNC_SECRET?.trim() || '',
-  enableConvexPublicSync: parseBoolean(
-    process.env.ENABLE_CONVEX_PUBLIC_SYNC,
-    false,
-  ) && Boolean(convexUrl && convexHttpActionsUrl),
+  convexSyncSecret,
+  enableConvexPublicSync: (() => {
+    const explicitlyEnabled = parseBoolean(process.env.ENABLE_CONVEX_PUBLIC_SYNC, false)
+    const configured = Boolean(convexUrl && convexHttpActionsUrl && convexSyncSecret)
+    if (explicitlyEnabled && !configured) {
+      console.error(
+        'ENABLE_CONVEX_PUBLIC_SYNC=true but CONVEX_URL, CONVEX_HTTP_ACTIONS_URL, and CONVEX_SYNC_SECRET are all required. Disabling Convex public sync.',
+      )
+    }
+    return explicitlyEnabled && configured
+  })(),
 }

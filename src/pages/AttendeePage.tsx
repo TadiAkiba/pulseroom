@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useParams } from 'react-router-dom'
-import { useQuery } from 'convex/react'
+import { ConvexProvider, useQuery } from 'convex/react'
 import { io, type Socket } from 'socket.io-client'
 import { Alert } from '../components/ui/Alert.tsx'
 import { Badge } from '../components/ui/Badge.tsx'
@@ -11,7 +11,7 @@ import { Field, Input, Select, Textarea } from '../components/ui/Field.tsx'
 import { Progress } from '../components/ui/Progress.tsx'
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/Tabs.tsx'
 import { api } from '../lib/api.ts'
-import { convexPublicSyncEnabled, convexQueries } from '../lib/convex.ts'
+import { convexQueries, getConvexClient, setConvexRuntimeConfig } from '../lib/convex.ts'
 import { socketUrl } from '../lib/realtime.ts'
 import type { AnonymousAttendeeProfile, EventPageData, EventSnapshot, InteractionRecord } from '../types.ts'
 
@@ -116,13 +116,25 @@ function getInteractionFormTitle(interaction: InteractionRecord) {
           : 'AI Townhall'
 }
 
+function ConvexSnapshotSubscriber({
+  code,
+  onUpdate,
+}: {
+  code: string
+  onUpdate: (next: EventSnapshot | null | undefined) => void
+}) {
+  const next = useQuery(convexQueries.getPublicByCode, code ? { code } : 'skip')
+  useEffect(() => {
+    onUpdate(next as EventSnapshot | null | undefined)
+  }, [next, onUpdate])
+  return null
+}
+
 export function AttendeePage() {
   const { code = '' } = useParams()
   const initialProfile = getStoredProfile(code)
-  const convexSnapshot = useQuery(
-    convexQueries.getPublicByCode,
-    convexPublicSyncEnabled && code ? { code } : 'skip',
-  )
+  const [convexOverride, setConvexOverride] = useState<EventSnapshot | null | undefined>(undefined)
+  const [convexEnabled, setConvexEnabled] = useState(false)
   const [data, setData] = useState<EventPageData | null>(null)
   const [snapshot, setSnapshot] = useState<EventSnapshot | null>(null)
   const [loading, setLoading] = useState(true)
@@ -140,7 +152,10 @@ export function AttendeePage() {
     nickname: initialProfile?.nickname ?? generateNickname(),
     team: initialProfile?.team ?? 'Catalysts',
   })
-  const liveSnapshot = (convexSnapshot as EventSnapshot | null | undefined) ?? snapshot
+  const convexLoaded = convexOverride !== undefined
+  const liveSnapshot = convexLoaded && convexOverride !== null
+    ? convexOverride
+    : snapshot
   const progress = progressByCode[code] ?? getStoredProgress(code)
   const teams = useMemo(() => getEventTeams(liveSnapshot), [liveSnapshot])
   const townhallInteractions = useMemo(
@@ -162,6 +177,11 @@ export function AttendeePage() {
     api
       .getEventByCode(code)
       .then((response) => {
+        if (response.convex) {
+          setConvexRuntimeConfig(response.convex)
+          setConvexEnabled(Boolean(response.convex.enabled))
+          setConvexOverride(undefined)
+        }
         setData(response)
         setSnapshot(response.snapshot)
         setCurrentIndex(0)
@@ -350,7 +370,19 @@ export function AttendeePage() {
   }
 
   return (
-    <main className="page attendee-page">
+    <>
+      {convexEnabled
+        ? (() => {
+            const client = getConvexClient()
+            if (!client) return null
+            return (
+              <ConvexProvider client={client}>
+                <ConvexSnapshotSubscriber code={code} onUpdate={setConvexOverride} />
+              </ConvexProvider>
+            )
+          })()
+        : null}
+      <main className="page attendee-page">
       <section className="attendee-hero">
         <div>
           <span className="eyebrow">AI Townhall Dashboard • code {data.event.code}</span>
@@ -691,6 +723,7 @@ export function AttendeePage() {
         </>
       ) : null}
     </main>
+    </>
   )
 }
 

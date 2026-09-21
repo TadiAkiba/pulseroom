@@ -146,6 +146,11 @@ export type EventSnapshot = {
   reactionTotals: Array<{ label: string; value: number }>
 }
 
+export type ConvexRuntimeConfig = {
+  enabled: boolean
+  url: string | null
+}
+
 export type EventPageData = {
   event: EventRecord
   interactions: InteractionRecord[]
@@ -153,6 +158,7 @@ export type EventPageData = {
   privacy: {
     notice: string
   }
+  convex?: ConvexRuntimeConfig
 }
 
 export type EventSocketPayload = {

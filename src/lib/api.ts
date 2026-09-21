@@ -1,4 +1,4 @@
-import type { AnonymousAttendeeProfile, AuthSession, DemoMeta, EventPageData, EventSnapshot, InteractionRecord } from '../types.ts'
+import type { AnonymousAttendeeProfile, AuthSession, ConvexRuntimeConfig, DemoMeta, EventPageData, EventSnapshot, InteractionRecord } from '../types.ts'
 import type { ImportedInteraction } from './interactionImport.ts'
 
 type FetchOptions = RequestInit & {
@@ -72,7 +72,8 @@ export const api = {
     payload: { moderationState?: 'pending' | 'visible' | 'hidden' | 'answered' | 'deleted'; highlighted?: boolean },
   ) => request<{ response: unknown }>(`/api/admin/responses/${responseId}`, { method: 'PATCH', json: payload }),
   getEventByCode: (code: string) => request<EventPageData>(`/api/events/code/${code}`),
-  getPresenterEvent: (code: string) => request<EventSnapshot>(`/api/events/code/${code}/presenter`),
+  getPresenterEvent: (code: string) =>
+    request<{ snapshot: EventSnapshot; convex?: ConvexRuntimeConfig }>(`/api/events/code/${code}/presenter`),
   submitResponse: (code: string, payload: Record<string, unknown>) =>
     request<{ responseId: string; message: string }>(`/api/events/code/${code}/responses`, { method: 'POST', json: payload }),
   voteIdea: (code: string, responseId: string, payload: { direction: 'up' | 'down'; attendee: AnonymousAttendeeProfile }) =>

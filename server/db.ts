@@ -304,6 +304,11 @@ export function countOrganizers() {
   return Number(row.count)
 }
 
+export function listOrganizers() {
+  const rows = db.prepare('SELECT * FROM organizers ORDER BY created_at ASC').all() as RawRow[]
+  return rows.map(rowToOrganizer)
+}
+
 export function getOrganizerByEmail(email: string) {
   const row = db.prepare('SELECT * FROM organizers WHERE email = ?').get(email.toLowerCase()) as RawRow | undefined
   return row ? rowToOrganizer(row) : null

@@ -32,6 +32,7 @@ import {
   listEvents,
   listEventsForOrganizer,
   listInteractions,
+  listOrganizers,
   listResponses,
   listResponseVotes,
   markConvexSyncFailure,
@@ -39,10 +40,11 @@ import {
   touchConvexSyncState,
   type InteractionType,
   type OrganizerRecord,
-  upsertResponseVote,
   updateEvent,
   updateInteraction,
+  updateOrganizerPassword,
   updateResponseModeration,
+  upsertResponseVote,
 } from './db.ts'
 import { hashPassword, verifyPassword } from './security.ts'
 
@@ -64,6 +66,7 @@ function convexBackoffMs(tries: number) {
 }
 
 initializeDatabase()
+applyOrganizerPasswordReset()
 reportAuthState()
 
 if (config.enableDemoSeed) {
@@ -169,8 +172,53 @@ function getActivePollInteractionId(event: { config: Record<string, unknown> }) 
   return typeof event.config.activePollInteractionId === 'string' ? event.config.activePollInteractionId : null
 }
 
+function maskEmail(email: string) {
+  const [local, domain] = email.split('@')
+  if (!local || !domain) return email
+  const safeLocal = local.length <= 2 ? local : `${local.slice(0, 2)}${'*'.repeat(Math.min(local.length - 2, 10))}`
+  const domainParts = domain.split('.')
+  const safeDomain = domainParts.length >= 2
+    ? `${domainParts[0].slice(0, Math.max(1, Math.min(2, domainParts[0].length)))}${'*'.repeat(Math.min(domainParts[0].length - 1, 8))}.${domainParts.slice(1).join('.')}`
+    : domain
+  return `${safeLocal}@${safeDomain}`
+}
+
+function applyOrganizerPasswordReset() {
+  const resetEmail = String(process.env.ORGANIZER_PASSWORD_RESET_EMAIL ?? '').trim().toLowerCase()
+  const resetPassword = String(process.env.ORGANIZER_PASSWORD_RESET_PASSWORD ?? '')
+  if (!resetEmail || !resetPassword) {
+    return
+  }
+  if (resetPassword.length < 8) {
+    console.warn(
+      `[auth] ORGANIZER_PASSWORD_RESET_PASSWORD is too short (min 8 chars); password reset for ${maskEmail(resetEmail)} skipped.`,
+    )
+    return
+  }
+  const target = getOrganizerByEmail(resetEmail)
+  if (!target) {
+    console.warn(
+      `[auth] ORGANIZER_PASSWORD_RESET_EMAIL=${maskEmail(resetEmail)} does not match any organizer; no reset applied.`,
+    )
+    return
+  }
+  try {
+    const newHash = hashPassword(resetPassword)
+    updateOrganizerPassword(target.id, newHash)
+    console.log(
+      `[auth] Password reset applied for organizer ${maskEmail(target.email)}. Remove ORGANIZER_PASSWORD_RESET_EMAIL + ORGANIZER_PASSWORD_RESET_PASSWORD from env vars for security.`,
+    )
+  } catch (err) {
+    console.error(
+      `[auth] Failed to apply password reset for ${maskEmail(resetEmail)}:`,
+      err instanceof Error ? err.message : err,
+    )
+  }
+}
+
 function reportAuthState() {
-  const total = countOrganizers()
+  const organizers = listOrganizers()
+  const total = organizers.length
   const signupAllowed = canRegisterOrganizer()
   const why = config.allowOrganizerSignup
     ? 'ALLOW_ORGANIZER_SIGNUP is enabled'
@@ -181,6 +229,16 @@ function reportAuthState() {
   console.log(
     `Auth: ${total} organizer(s) registered. Signup ${signupAllowed ? 'OPEN' : 'CLOSED'} — ${why}.`,
   )
+  if (total > 0) {
+    console.log(
+      `Auth: existing accounts → ${organizers.map((o) => `${maskEmail(o.email)} (id ${o.id.slice(0, 6)}…)`).join(', ')}.`,
+    )
+  }
+  if (process.env.ORGANIZER_PASSWORD_RESET_EMAIL) {
+    console.warn(
+      '[auth] ORGANIZER_PASSWORD_RESET_EMAIL is set in env vars. After successful login, remove both ORGANIZER_PASSWORD_RESET_EMAIL and ORGANIZER_PASSWORD_RESET_PASSWORD from the deployment to prevent repeat resets.',
+    )
+  }
   if (total === 0) {
     console.log(
       'Tip: on first run, visit the dashboard to create your initial organizer account from the UI.',
@@ -969,10 +1027,17 @@ if (config.enableConvexPublicSync) {
 
 app.get('/api/health', (_req, res) => {
   const pending = listConvexSyncFailures().length
+  const organizers = listOrganizers()
   res.json({
     ok: true,
     mode: config.nodeEnv,
     analysisProvider: config.analysisProvider,
+    auth: {
+      organizerCount: organizers.length,
+      canRegister: canRegisterOrganizer(),
+      allowOrganizerSignup: config.allowOrganizerSignup,
+      organizers: organizers.map((o) => ({ emailMasked: maskEmail(o.email), createdAt: o.createdAt })),
+    },
     convex: {
       enabled: config.enableConvexPublicSync,
       url: config.enableConvexPublicSync ? config.convexUrl : null,

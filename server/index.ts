@@ -399,73 +399,7 @@ function createDefaultInteractions(eventId: string) {
   if (existing.length > 0) {
     return existing
   }
-
-  return [
-    createInteraction({
-      eventId,
-      type: 'question',
-      prompt: 'What question would you like us to answer?',
-      settings: {
-        formKey: 'qa',
-        formTitle: 'Ask the Room',
-        formDescription: 'Ask anonymously and let the room upvote the questions they want answered live.',
-        questionNumber: 1,
-        questionCount: 1,
-        points: 4,
-      },
-      ordering: 1,
-    }),
-    createInteraction({
-      eventId,
-      type: 'poll',
-      prompt: 'What matters most to you right now?',
-      options: [
-        'Customer experience',
-        'Employee experience',
-        'Productivity',
-        'Cost efficiency',
-        'Revenue growth',
-      ],
-      settings: {
-        formKey: 'event',
-        formTitle: 'Live poll',
-        questionNumber: 1,
-        questionCount: 3,
-        allowMultiple: false,
-        points: 2,
-      },
-      ordering: 2,
-    }),
-    createInteraction({
-      eventId,
-      type: 'rating',
-      prompt: 'How is the event going so far?',
-      settings: {
-        formKey: 'event',
-        formTitle: 'Pulse check',
-        questionNumber: 2,
-        questionCount: 3,
-        scale: 5,
-        labels: ['Poor', 'Fair', 'Good', 'Great', 'Excellent'],
-        points: 2,
-      },
-      ordering: 3,
-    }),
-    createInteraction({
-      eventId,
-      type: 'feedback',
-      prompt: 'What should we keep doing more of?',
-      settings: {
-        formKey: 'event',
-        formTitle: 'Feedback',
-        questionNumber: 3,
-        questionCount: 3,
-        feedEligible: true,
-        points: 4,
-      },
-      ordering: 4,
-    }),
-  ]
+  return []
 }
 
 function formatTime(iso: string) {

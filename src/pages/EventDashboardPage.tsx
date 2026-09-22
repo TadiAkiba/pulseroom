@@ -33,15 +33,23 @@ import { PulseGaugeCard } from '../components/dashboard/PulseGaugeCard.tsx'
 import { parseInteractionFile } from '../lib/interactionImport.ts'
 import type { EventSnapshot, InteractionRecord, InteractionType } from '../types.ts'
 
-const dashboardTabs = ['overview', 'analytics', 'questions', 'polls', 'compose'] as const
+const dashboardTabs = ['overview', 'analytics', 'questions', 'interactions', 'compose'] as const
 type DashboardTab = (typeof dashboardTabs)[number]
 
 const TAB_LABEL: Record<DashboardTab, string> = {
   overview: 'Overview',
   analytics: 'Analytics',
   questions: 'Questions',
-  polls: 'Polls',
+  interactions: 'Interactions',
   compose: 'Compose',
+}
+
+const INTERACTION_TYPE_LABEL: Record<InteractionType, string> = {
+  question: 'Question',
+  feedback: 'Feedback',
+  rating: 'Rating',
+  poll: 'Poll',
+  reaction: 'Reaction',
 }
 
 function resolvePaletteCssVar(token: string, fallback: string) {
@@ -231,6 +239,48 @@ export function EventDashboardPage() {
       { name: 'Neutral', label: 'Neutral', value: snapshot.analytics.sentiment.neutral },
       { name: 'Negative', label: 'Negative', value: snapshot.analytics.sentiment.negative },
     ]
+  }, [snapshot])
+
+  const pollResultById = useMemo(() => {
+    if (!snapshot) return new Map<string, EventSnapshot['pollResults'][number]>()
+    return new Map(snapshot.pollResults.map((poll) => [poll.id, poll]))
+  }, [snapshot])
+
+  const ratingResultById = useMemo(() => {
+    if (!snapshot) return new Map<string, EventSnapshot['ratingResults'][number]>()
+    return new Map(snapshot.ratingResults.map((rating) => [rating.id, rating]))
+  }, [snapshot])
+
+  const responseCountByInteractionId = useMemo(() => {
+    if (!snapshot) return new Map<string, number>()
+    const counts = new Map<string, number>()
+    for (const item of snapshot.questionStream) {
+      counts.set(item.interactionId, (counts.get(item.interactionId) ?? 0) + 1)
+    }
+    for (const item of snapshot.ideaFeed) {
+      counts.set(item.interactionId, (counts.get(item.interactionId) ?? 0) + 1)
+    }
+    for (const poll of snapshot.pollResults) {
+      counts.set(poll.id, poll.totalVotes)
+    }
+    for (const rating of snapshot.ratingResults) {
+      counts.set(rating.id, rating.responses)
+    }
+    let reactionCount = 0
+    for (const reaction of snapshot.reactionTotals) {
+      reactionCount += reaction.value
+    }
+    for (const interaction of snapshot.interactions) {
+      if (interaction.type === 'reaction') {
+        counts.set(interaction.id, (counts.get(interaction.id) ?? 0) + reactionCount)
+      }
+    }
+    return counts
+  }, [snapshot])
+
+  const orderedInteractions = useMemo(() => {
+    if (!snapshot) return [] as InteractionRecord[]
+    return [...snapshot.interactions].sort((a, b) => a.ordering - b.ordering)
   }, [snapshot])
 
   const paletteHook = useMemo(
@@ -606,42 +656,102 @@ export function EventDashboardPage() {
         </section>
       ) : null}
 
-      {activeTab === 'polls' ? (
+      {activeTab === 'interactions' ? (
         <section style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: '1.25rem' }}>
           <Card className="chart-panel">
             <ChartShell
-              eyebrow="Polls"
-              title="Poll results"
-              meta="Launch a poll from here and its results will appear instantly on attendee and presenter screens."
+              eyebrow="Interactions"
+              title="All audience prompts"
+              meta="Every Question, Feedback, Pulse check, Poll, and Reaction you create — sorted by ordering."
             >
-              {snapshot.pollResults.map((poll) => (
-                <div key={poll.id} className="poll-block">
-                  <div className="poll-block__header">
-                    <div>
-                      <strong>{poll.prompt}</strong>
-                      <p>{poll.totalVotes} responses</p>
-                    </div>
-                    <div className="achievement-row">
-                      {poll.active ? <Badge variant="success">Live now</Badge> : null}
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant={poll.active ? 'outline' : 'secondary'}
-                        disabled={saving}
-                        onClick={() => setActivePoll(poll.active ? null : poll.id)}
-                      >
-                        {poll.active ? 'Clear poll' : 'Launch poll'}
-                      </Button>
-                    </div>
-                  </div>
-                  <PollBars options={poll.options} />
-                </div>
-              ))}
-              {snapshot.pollResults.length === 0 ? (
+              {orderedInteractions.length === 0 ? (
                 <p className="muted" style={{ marginTop: '0.5rem' }}>
-                  No polls configured yet. Switch to the Compose tab to create one.
+                  No interactions yet. Switch to the Compose tab to create one.
                 </p>
-              ) : null}
+              ) : (
+                orderedInteractions.map((interaction) => {
+                  const poll = pollResultById.get(interaction.id)
+                  const rating = ratingResultById.get(interaction.id)
+                  const responses = responseCountByInteractionId.get(interaction.id) ?? 0
+                  const statusBadge =
+                    interaction.status === 'active' ? (
+                      <Badge variant="outline">Active</Badge>
+                    ) : (
+                      <Badge variant="outline">Paused</Badge>
+                    )
+                  return (
+                    <article key={interaction.id} className="poll-block" style={{ marginBottom: '1.25rem' }}>
+                      <div className="poll-block__header">
+                        <div>
+                          <div className="achievement-row" style={{ marginBottom: '0.35rem' }}>
+                            <Badge variant="info">{INTERACTION_TYPE_LABEL[interaction.type]}</Badge>
+                            {statusBadge}
+                            {poll?.active ? <Badge variant="success">Live now</Badge> : null}
+                            <span className="muted" style={{ fontSize: '0.82rem' }}>#{interaction.ordering}</span>
+                          </div>
+                          <strong>{interaction.prompt || <em className="muted">No prompt</em>}</strong>
+                          <p>
+                            {responses} response{responses === 1 ? '' : 's'}
+                            {interaction.options.length > 0 ? ` • ${interaction.options.length} options` : ''}
+                          </p>
+                        </div>
+                        {interaction.type === 'poll' && poll ? (
+                          <div className="achievement-row">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant={poll.active ? 'outline' : 'secondary'}
+                              disabled={saving}
+                              onClick={() => setActivePoll(poll.active ? null : poll.id)}
+                            >
+                              {poll.active ? 'Clear poll' : 'Launch poll'}
+                            </Button>
+                          </div>
+                        ) : null}
+                      </div>
+                      {interaction.type === 'poll' && poll ? (
+                        <PollBars options={poll.options} />
+                      ) : null}
+                      {interaction.type === 'rating' && rating ? (
+                        <div className="stack-list" style={{ marginTop: '0.75rem' }}>
+                          <div className="stat-row">
+                            <div>
+                              <strong>Average</strong>
+                              <p>{rating.responses} responses</p>
+                            </div>
+                            <span>
+                              {rating.average}/{rating.scale}
+                            </span>
+                          </div>
+                        </div>
+                      ) : null}
+                      {interaction.type === 'reaction' ? (
+                        <div className="chip-row" style={{ marginTop: '0.75rem' }}>
+                          {interaction.options.length === 0 ? (
+                            <span className="muted">No reaction options set.</span>
+                          ) : (
+                            interaction.options.map((option) => {
+                              const total = snapshot.reactionTotals.find((item) => item.label === option)?.value ?? 0
+                              return (
+                                <Badge key={option} variant="outline">
+                                  {option} · {total}
+                                </Badge>
+                              )
+                            })
+                          )}
+                        </div>
+                      ) : null}
+                      {(interaction.type === 'question' || interaction.type === 'feedback') ? (
+                        <div className="muted" style={{ marginTop: '0.6rem', fontSize: '0.86rem' }}>
+                          {interaction.type === 'question'
+                            ? 'Responses appear in the Questions tab as attendees submit them.'
+                            : 'Top responses appear in the idea feed under Analytics.'}
+                        </div>
+                      ) : null}
+                    </article>
+                  )
+                })
+              )}
             </ChartShell>
           </Card>
         </section>

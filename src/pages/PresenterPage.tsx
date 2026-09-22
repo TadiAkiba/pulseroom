@@ -109,7 +109,7 @@ export function PresenterPage() {
   const [view, setView] = useState<PresenterView>('questions')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const liveSnapshot = isConvexEnabled() && convexOverride !== null
+  const liveSnapshot = isConvexEnabled() && convexOverride && typeof convexOverride === 'object'
     ? convexOverride
     : snapshot
 
@@ -187,30 +187,42 @@ export function PresenterPage() {
     [totalEngagement],
   )
 
+  const shouldMountConvexSubscriber = Boolean(code) && isConvexEnabled()
+
   if (loading) {
     return (
-      <main className="presenter-shell">
-        <div className="presenter-center">
-          <h1>Loading presenter mode...</h1>
-        </div>
-      </main>
+      <>
+        {shouldMountConvexSubscriber ? (
+          <ConvexSnapshotSubscriber code={code} onUpdate={setConvexOverride} />
+        ) : null}
+        <main className="presenter-shell">
+          <div className="presenter-center">
+            <h1>Loading presenter mode...</h1>
+          </div>
+        </main>
+      </>
     )
   }
 
   if (error || !liveSnapshot) {
     return (
-      <main className="presenter-shell">
-        <div className="presenter-center">
-          <h1>Presenter mode unavailable</h1>
-          <p>{error}</p>
-        </div>
-      </main>
+      <>
+        {shouldMountConvexSubscriber ? (
+          <ConvexSnapshotSubscriber code={code} onUpdate={setConvexOverride} />
+        ) : null}
+        <main className="presenter-shell">
+          <div className="presenter-center">
+            <h1>Presenter mode unavailable</h1>
+            <p>{error}</p>
+          </div>
+        </main>
+      </>
     )
   }
 
   return (
     <>
-      {isConvexEnabled() ? (
+      {shouldMountConvexSubscriber ? (
         <ConvexSnapshotSubscriber code={code} onUpdate={setConvexOverride} />
       ) : null}
       <main className="presenter-shell">

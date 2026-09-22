@@ -10,7 +10,7 @@ export function setConvexRuntimeConfig(overrides: { enabled: boolean; url: strin
   runtimeOverrides = overrides
 }
 
-function getEnabled() {
+export function isConvexEnabled() {
   if (runtimeOverrides) return runtimeOverrides.enabled
   return buildTimeEnabled
 }
@@ -20,23 +20,21 @@ function getUrl() {
   return buildTimeUrl || null
 }
 
-let cachedClient: ConvexReactClient | null = null
-let lastCachedUrl: string | null = null
-
-export function getConvexClient(): ConvexReactClient | null {
-  if (!getEnabled()) return null
-  const url = getUrl()
-  if (!url) return null
-  if (cachedClient && lastCachedUrl === url) {
-    return cachedClient
+const stableClient = (() => {
+  const initialUrl = getUrl()
+  if (!initialUrl) {
+    const placeholder = 'https://pulseroom.convex.invalid'
+    return new ConvexReactClient(placeholder)
   }
-  cachedClient = new ConvexReactClient(url)
-  lastCachedUrl = url
-  return cachedClient
+  return new ConvexReactClient(initialUrl)
+})()
+
+export function getConvexClient(): ConvexReactClient {
+  return stableClient
 }
 
 export const convexPublicSyncEnabled = {
-  enabled: getEnabled,
+  enabled: isConvexEnabled,
   url: getUrl,
 }
 

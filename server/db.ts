@@ -999,13 +999,19 @@ export function markConvexSyncSuccess(eventId: string) {
 export function markConvexSyncFailure(eventId: string, error: string, nextRetryAt: string) {
   db.prepare(
     `
-      UPDATE convex_sync_state
-      SET tries = tries + 1,
-          last_error = ?,
-          next_retry_at = ?
-      WHERE event_id = ?
+      INSERT INTO convex_sync_state (event_id, updated_at, tries, last_error, next_retry_at)
+      VALUES (@eventId, @updatedAt, 1, @error, @nextRetryAt)
+      ON CONFLICT(event_id) DO UPDATE SET
+        tries = convex_sync_state.tries + 1,
+        last_error = excluded.last_error,
+        next_retry_at = excluded.next_retry_at
     `,
-  ).run(error, nextRetryAt, eventId)
+  ).run({
+    eventId,
+    updatedAt: nextRetryAt,
+    error,
+    nextRetryAt,
+  })
 }
 
 export function listConvexSyncFailures() {

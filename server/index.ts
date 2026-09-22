@@ -1511,9 +1511,13 @@ io.on('connection', (socket) => {
     const cookies = parseCookieHeader(socket.handshake.headers.cookie)
     const sessionId = cookies.get('organizer_session') ?? ''
     const lookup = sessionId ? getOrganizerSession(sessionId) : null
-    const event = lookup ? ensureEventReadAccess(eventId, lookup.organizer.id) : null
-    if (!lookup || !event) {
+    if (!lookup) {
       socket.emit('event:error', { message: 'Organizer session required for admin stream.' })
+      return
+    }
+    const event = ensureEventAccess(eventId, lookup.organizer.id)
+    if (!event) {
+      socket.emit('event:error', { message: 'This event is not managed by this organizer account.' })
       return
     }
 
@@ -1522,7 +1526,7 @@ io.on('connection', (socket) => {
       return
     }
 
-    socket.join(`event:${eventId}:admin`)
+    socket.join(`event:${event.id}:admin`)
     socket.emit('event:update-admin', snapshot)
   })
 })

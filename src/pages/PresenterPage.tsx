@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
-import { ConvexProvider, useQuery } from 'convex/react'
+import { useQuery } from 'convex/react'
 import { useParams } from 'react-router-dom'
 import { io, type Socket } from 'socket.io-client'
 import {
@@ -18,7 +18,7 @@ import {
 import { Badge } from '../components/ui/Badge.tsx'
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/Tabs.tsx'
 import { api } from '../lib/api.ts'
-import { convexQueries, getConvexClient, setConvexRuntimeConfig } from '../lib/convex.ts'
+import { convexQueries, isConvexEnabled, setConvexRuntimeConfig } from '../lib/convex.ts'
 import { socketUrl } from '../lib/realtime.ts'
 import type { EventSnapshot } from '../types.ts'
 
@@ -185,13 +185,11 @@ function ConvexSnapshotSubscriber({
 export function PresenterPage() {
   const { code = '' } = useParams()
   const [convexOverride, setConvexOverride] = useState<EventSnapshot | null | undefined>(undefined)
-  const [convexEnabled, setConvexEnabled] = useState(false)
   const [snapshot, setSnapshot] = useState<EventSnapshot | null>(null)
   const [view, setView] = useState<PresenterView>('questions')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const convexLoaded = convexOverride !== undefined
-  const liveSnapshot = convexLoaded && convexOverride !== null
+  const liveSnapshot = isConvexEnabled() && convexOverride !== null
     ? convexOverride
     : snapshot
 
@@ -203,7 +201,6 @@ export function PresenterPage() {
       .then((response) => {
         if (response.convex) {
           setConvexRuntimeConfig(response.convex)
-          setConvexEnabled(Boolean(response.convex.enabled))
           setConvexOverride(undefined)
         }
         setSnapshot(response.snapshot)
@@ -297,17 +294,9 @@ export function PresenterPage() {
 
   return (
     <>
-      {convexEnabled
-        ? (() => {
-            const client = getConvexClient()
-            if (!client) return null
-            return (
-              <ConvexProvider client={client}>
-                <ConvexSnapshotSubscriber code={code} onUpdate={setConvexOverride} />
-              </ConvexProvider>
-            )
-          })()
-        : null}
+      {isConvexEnabled() ? (
+        <ConvexSnapshotSubscriber code={code} onUpdate={setConvexOverride} />
+      ) : null}
       <main className="presenter-shell">
         <header className="presenter-header">
           <div className="presenter-header__top">

@@ -1,5 +1,7 @@
 import { lazy, Suspense } from 'react'
 import { Link, Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { ConvexProvider } from 'convex/react'
+import { getConvexClient } from './lib/convex.ts'
 import { Card, CardContent, CardDescription, CardTitle } from './components/ui/Card.tsx'
 
 const JoinPage = lazy(() => import('./pages/JoinPage.tsx').then((module) => ({ default: module.JoinPage })))
@@ -38,30 +40,34 @@ function TopNav() {
 }
 
 export default function App() {
+  const convexClient = getConvexClient()
+
   return (
-    <div className="app-shell">
-      <TopNav />
-      <Suspense
-        fallback={
-          <main className="page center-state">
-            <Card className="ui-state-card">
-              <CardContent>
-                <CardTitle>Loading experience...</CardTitle>
-                <CardDescription>Pulling in the right live view for this route.</CardDescription>
-              </CardContent>
-            </Card>
-          </main>
-        }
-      >
-        <Routes>
-          <Route path="/" element={<Navigate to="/join" replace />} />
-          <Route path="/join" element={<JoinPage />} />
-          <Route path="/event/:code" element={<AttendeePage />} />
-          <Route path="/dashboard" element={<DashboardPage />} />
-          <Route path="/dashboard/:eventId" element={<EventDashboardPage />} />
-          <Route path="/present/:code" element={<PresenterPage />} />
-        </Routes>
-      </Suspense>
-    </div>
+    <ConvexProvider client={convexClient}>
+      <div className="app-shell">
+        <TopNav />
+        <Suspense
+          fallback={
+            <main className="page center-state">
+              <Card className="ui-state-card">
+                <CardContent>
+                  <CardTitle>Loading experience...</CardTitle>
+                  <CardDescription>Pulling in the right live view for this route.</CardDescription>
+                </CardContent>
+              </Card>
+            </main>
+          }
+        >
+          <Routes>
+            <Route path="/" element={<Navigate to="/join" replace />} />
+            <Route path="/join" element={<JoinPage />} />
+            <Route path="/event/:code" element={<AttendeePage />} />
+            <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/dashboard/:eventId" element={<EventDashboardPage />} />
+            <Route path="/present/:code" element={<PresenterPage />} />
+          </Routes>
+        </Suspense>
+      </div>
+    </ConvexProvider>
   )
 }

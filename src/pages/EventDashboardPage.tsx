@@ -204,7 +204,29 @@ export function EventDashboardPage() {
     moderationState: 'pending' | 'visible' | 'hidden' | 'answered' | 'deleted',
     highlighted?: boolean,
   ) {
-    await api.updateResponse(responseId, { moderationState, highlighted })
+    try {
+      setError('')
+      setNotice('')
+      await api.updateResponse(responseId, { moderationState, highlighted })
+      const label =
+        moderationState === 'visible'
+          ? 'Question is now visible on the dashboard and stage.'
+          : moderationState === 'hidden'
+            ? 'Question removed from all public views.'
+            : moderationState === 'answered'
+              ? 'Question marked as answered.'
+              : moderationState === 'deleted'
+                ? 'Question permanently deleted.'
+                : 'Question returned to pending review.'
+      setNotice(label)
+    } catch (moderateError) {
+      const fallback =
+        moderationState === 'deleted'
+          ? 'Unable to delete question. Refresh and try again.'
+          : 'Unable to update question state. Refresh and try again.'
+      setError(moderateError instanceof Error ? moderateError.message : fallback)
+      setNotice('')
+    }
   }
 
   async function toggleEventStatus() {

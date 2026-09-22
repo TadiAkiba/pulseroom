@@ -25,6 +25,7 @@ import {
   getManageableEventById,
   getOrganizerByEmail,
   getOrganizerSession,
+  getReadableEventById,
   getResponse,
   initializeDatabase,
   listAnalyses,
@@ -431,6 +432,10 @@ function formatTime(iso: string) {
 
 function ensureEventAccess(eventId: string, organizerId: string) {
   return getManageableEventById(eventId, organizerId)
+}
+
+function ensureEventReadAccess(eventId: string, organizerId: string) {
+  return getReadableEventById(eventId, organizerId)
 }
 
 function buildEventSnapshot(eventId: string, includeHidden: boolean) {
@@ -919,16 +924,34 @@ if (config.enableConvexPublicSync) {
 
 app.get('/api/health', (_req, res) => {
   const pending = listConvexSyncFailures().length
-  const organizers = listOrganizers()
   res.json({
-    ok: true,
+    status: 'ok',
+    db: 'ok',
+    mode: config.nodeEnv,
+    convex: {
+      enabled: config.enableConvexPublicSync,
+      pendingFailures: pending,
+    },
+  })
+})
+
+app.get('/api/admin/health', requireOrganizer, (_req, res) => {
+  const organizers = listOrganizers()
+  const pending = listConvexSyncFailures().length
+  res.json({
+    status: 'ok',
+    db: 'ok',
     mode: config.nodeEnv,
     analysisProvider: config.analysisProvider,
     auth: {
       organizerCount: organizers.length,
       canRegister: canRegisterOrganizer(),
       allowOrganizerSignup: config.allowOrganizerSignup,
-      organizers: organizers.map((o) => ({ emailMasked: maskEmail(o.email), createdAt: o.createdAt })),
+      organizers: organizers.map((o) => ({
+        id: o.id,
+        emailMasked: maskEmail(o.email),
+        createdAt: o.createdAt,
+      })),
     },
     convex: {
       enabled: config.enableConvexPublicSync,
@@ -1043,7 +1066,7 @@ app.post('/api/admin/events', requireOrganizer, (req, res) => {
 
 app.get('/api/admin/events/:eventId', requireOrganizer, (req, res) => {
   const organizer = (req as OrganizerRequest).organizer
-  const event = ensureEventAccess(String(req.params.eventId), organizer.id)
+  const event = ensureEventReadAccess(String(req.params.eventId), organizer.id)
   if (!event) {
     res.status(404).json({ error: 'Event not found.' })
     return
@@ -1441,7 +1464,7 @@ io.on('connection', (socket) => {
     const cookies = parseCookieHeader(socket.handshake.headers.cookie)
     const sessionId = cookies.get('organizer_session') ?? ''
     const lookup = sessionId ? getOrganizerSession(sessionId) : null
-    const event = lookup ? ensureEventAccess(eventId, lookup.organizer.id) : null
+    const event = lookup ? ensureEventReadAccess(eventId, lookup.organizer.id) : null
     if (!lookup || !event) {
       socket.emit('event:error', { message: 'Organizer session required for admin stream.' })
       return

@@ -1,7 +1,7 @@
 import Database from 'better-sqlite3'
 import fs from 'node:fs'
 import path from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { pbkdf2Sync, randomBytes, randomUUID } from 'node:crypto'
 import { config } from './config.ts'
 
 export type InteractionType = 'question' | 'feedback' | 'rating' | 'poll' | 'reaction'
@@ -337,6 +337,22 @@ export function createOrganizer(input: { email: string; passwordHash: string }) 
   return organizer
 }
 
+export function ensureSystemDemoOrganizer() {
+  const existing = getOrganizerByEmail(config.demoOrganizerEmail)
+  if (existing) return existing
+  const salt = randomBytes(24).toString('base64')
+  const pepper = randomBytes(24).toString('base64')
+  const unusedPasswordHash =
+    'sha256:120000:' +
+    salt +
+    ':' +
+    pbkdf2Sync(`${pepper}${config.demoOrganizerEmail}`, salt, 120000, 32, 'sha256').toString('base64')
+  return createOrganizer({
+    email: config.demoOrganizerEmail,
+    passwordHash: unusedPasswordHash,
+  })
+}
+
 export function updateOrganizerPassword(id: string, passwordHash: string) {
   db.prepare('UPDATE organizers SET password_hash = ? WHERE id = ?').run(passwordHash, id)
   return getOrganizerById(id)
@@ -438,6 +454,13 @@ export function getEventById(id: string) {
 }
 
 export function getManageableEventById(id: string, organizerId: string) {
+  const row = db
+    .prepare('SELECT * FROM events WHERE id = ? AND organizer_id = ?')
+    .get(id, organizerId) as RawRow | undefined
+  return row ? rowToEvent(row) : null
+}
+
+export function getReadableEventById(id: string, organizerId: string) {
   const row = db
     .prepare('SELECT * FROM events WHERE id = ? AND (organizer_id = ? OR is_demo = 1)')
     .get(id, organizerId) as RawRow | undefined
@@ -815,8 +838,9 @@ export function ensureDemoEvent(organizerId?: string) {
     return rowToEvent(demo)
   }
 
+  const systemDemoOrganizer = ensureSystemDemoOrganizer()
   const event = createEvent({
-    organizerId: organizerId ?? null,
+    organizerId: organizerId ?? systemDemoOrganizer.id,
     name: 'Future of Product Summit',
     description: 'Demo event with seeded live engagement data for presenter mode and dashboard exploration.',
     isDemo: true,

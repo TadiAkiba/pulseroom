@@ -76,6 +76,7 @@ export const config = {
     true,
   ),
   analysisProvider: process.env.ANALYSIS_PROVIDER?.trim() || 'heuristic',
+  demoOrganizerEmail: (process.env.DEMO_ORGANIZER_EMAIL?.trim() || 'demo@pulseroom.internal').toLowerCase(),
   convexUrl,
   convexHttpActionsUrl,
   convexSyncSecret,

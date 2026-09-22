@@ -92,7 +92,17 @@ function setStoredProfile(code: string, profile: AnonymousAttendeeProfile) {
 }
 
 function createAttendeeKey() {
-  return `attendee-${Math.random().toString(36).slice(2, 12)}${Date.now().toString(36)}`
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `attendee-${crypto.randomUUID().replaceAll('-', '')}`
+  }
+  const bytes = new Uint8Array(16)
+  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+    crypto.getRandomValues(bytes)
+  } else {
+    for (let i = 0; i < bytes.length; i += 1) bytes[i] = Math.floor(Math.random() * 256)
+  }
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+  return `attendee-${hex}`
 }
 
 function generateNickname() {

@@ -415,12 +415,9 @@ export function AttendeePage() {
           <div className="stack-list">
             <div>
               <span className="eyebrow">Step 1</span>
-              <h2>Choose or generate your anonymous nickname</h2>
+              <h2>Choose your anonymous nickname and team</h2>
               <p className="muted">Nicknames and teams are visible in the townhall feed, but they are not linked to your real identity.</p>
             </div>
-            <Button type="button" variant="outline" onClick={() => setDraftProfile((current) => ({ ...current, nickname: generateNickname() }))}>
-              Generate nickname
-            </Button>
           </div>
           <div className="townhall-setup__grid">
             <Field label="Anonymous nickname">

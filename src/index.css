@@ -802,6 +802,7 @@ h3 {
 .reaction-grid,
 .question-actions,
 .presenter-tabs,
+.dashboard-tabs,
 .stats-row,
 .stack-list,
 .import-actions {
@@ -1153,21 +1154,21 @@ h3 {
   align-items: center;
 }
 
-/* Presenter — keep a premium warm-cocoa dark mode (keeps stage impact, matches property marketing visuals) */
+/* Presenter — editorial warm-clay stage (matches dashboard + attendee editorial palette) */
 
 .presenter-shell {
   min-height: 100vh;
   padding: 2rem;
   background:
-    radial-gradient(circle at top, rgba(207, 98, 39, 0.18), transparent 40%),
-    linear-gradient(180deg, #1d1510 0%, #130e0a 100%);
-  color: #f6efe2;
+    radial-gradient(circle at top, rgba(207, 98, 39, 0.12), transparent 48%),
+    linear-gradient(180deg, #fdf8f1 0%, #ffffff 32%, #faf7f1 100%);
+  color: var(--text);
 }
 
 .presenter-shell h1,
 .presenter-shell h2,
 .presenter-shell h3 {
-  color: #fbf4e4;
+  color: var(--text);
 }
 
 .presenter-shell .muted,
@@ -1176,7 +1177,7 @@ h3 {
 .presenter-shell .stat-row p,
 .presenter-shell .presenter-support-copy,
 .presenter-shell .presenter-card p {
-  color: #c8bca6;
+  color: var(--text-soft);
 }
 
 .presenter-header {
@@ -1198,12 +1199,15 @@ h3 {
 }
 
 .presenter-marquee .presenter-card {
-  background: linear-gradient(135deg, rgba(207, 98, 39, 0.16), rgba(29, 21, 16, 0.8));
-  border-color: rgba(207, 98, 39, 0.32);
+  background:
+    linear-gradient(135deg, var(--accent-soft) 0%, var(--surface) 62%),
+    var(--surface);
+  border-color: var(--border-soft);
+  box-shadow: var(--shadow-2);
 }
 
 .presenter-marquee .presenter-card strong {
-  color: #fff3e0;
+  color: var(--text);
 }
 
 .presenter-achievements {
@@ -1216,17 +1220,18 @@ h3 {
 .presenter-stage {
   min-height: calc(100vh - 180px);
   border-radius: var(--radius-2xl);
-  border: 1px solid rgba(207, 165, 121, 0.25);
+  border: 1px solid var(--border-soft);
   padding: 1.5rem;
-  background: rgba(29, 21, 16, 0.78);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  background: var(--surface);
+  box-shadow: var(--shadow-2), inset 0 1px 0 rgba(255, 255, 255, 0.6);
 }
 
 .presenter-stage--charged {
   background:
-    radial-gradient(circle at top, rgba(251, 191, 36, 0.16), transparent 40%),
-    rgba(29, 21, 16, 0.88);
-  border-color: rgba(251, 191, 36, 0.35);
+    radial-gradient(circle at top, rgba(110, 106, 13, 0.08), transparent 40%),
+    var(--surface);
+  border-color: var(--accent-2-soft);
+  box-shadow: var(--shadow-3);
 }
 
 .presenter-question-grid {
@@ -1238,17 +1243,17 @@ h3 {
 .presenter-card {
   padding: 1.5rem 1.7rem;
   min-height: 180px;
-  background: rgba(42, 33, 24, 0.9);
-  border-color: rgba(207, 165, 121, 0.25);
-  box-shadow: none;
+  background: var(--surface);
+  border-color: var(--border-soft);
+  box-shadow: var(--shadow-1);
 }
 
 .presenter-card--gamified {
   min-height: 0;
   background:
-    linear-gradient(135deg, rgba(207, 98, 39, 0.22), rgba(110, 106, 13, 0.12)),
-    rgba(42, 33, 24, 0.9);
-  border-color: rgba(207, 98, 39, 0.42);
+    linear-gradient(135deg, var(--surface-strong) 0%, var(--surface) 60%),
+    var(--surface);
+  border-color: var(--border-soft);
 }
 
 .presenter-card.wide {
@@ -1281,45 +1286,45 @@ h3 {
 
 .presenter-word-cloud span,
 .presenter-shell .word-cloud span {
-  color: #f1cd9e;
+  color: var(--text-soft);
 }
 
 .presenter-shell .stats-row div {
-  background: rgba(42, 33, 24, 0.85);
-  border-color: rgba(207, 165, 121, 0.25);
-  box-shadow: none;
+  background: var(--surface-alt);
+  border-color: var(--border-soft);
+  box-shadow: var(--shadow-1);
 }
 
 .presenter-shell .stats-row strong {
-  color: #fff3e0;
+  color: var(--text);
 }
 
 .presenter-shell .ui-progress {
-  background: rgba(207, 165, 121, 0.16);
+  background: var(--border-soft);
 }
 
 .presenter-shell .ui-tabs__list {
-  background: rgba(42, 33, 24, 0.85);
-  border-color: rgba(207, 165, 121, 0.2);
-  box-shadow: none;
+  background: var(--surface-muted);
+  border-color: var(--border-soft);
+  box-shadow: var(--shadow-1);
 }
 
 .presenter-shell .ui-tabs__trigger {
-  color: #c8bca6;
+  color: var(--text-soft);
   box-shadow: none;
 }
 
 .presenter-shell .ui-tabs__trigger:hover {
-  background: rgba(62, 47, 33, 0.85);
-  color: #fbf4e4;
+  background: var(--surface-alt);
+  color: var(--text);
   border-color: transparent;
 }
 
 .presenter-shell .ui-tabs__trigger--active {
-  background: linear-gradient(135deg, rgba(207, 98, 39, 0.38), rgba(110, 106, 13, 0.22));
-  color: #fff3e0;
-  border-color: rgba(207, 98, 39, 0.45);
-  box-shadow: none;
+  background: linear-gradient(135deg, var(--surface) 0%, var(--accent-soft) 100%);
+  color: var(--text);
+  border-color: var(--accent-soft);
+  box-shadow: var(--shadow-1);
 }
 
 /* --- Townhall --- */
@@ -1539,24 +1544,24 @@ h3 {
 }
 
 .presenter-shell .poll-bar {
-  background: rgba(42, 33, 24, 0.88);
-  border-color: rgba(207, 165, 121, 0.25);
+  background: var(--surface-strong);
+  border-color: var(--border-soft);
 }
 
 .presenter-shell .poll-bar__label {
-  color: #fbf4e4;
+  color: var(--text);
 }
 
 .presenter-shell .poll-bar__track {
-  background: rgba(207, 165, 121, 0.16);
+  background: var(--border-soft);
 }
 
 .presenter-shell .poll-bar__value {
-  color: #fff3e0;
+  color: var(--text);
 }
 
 .presenter-shell .poll-bar__pct {
-  color: #c8bca6;
+  color: var(--muted);
 }
 
 /* Question table — ReUI columnar editorial structure (no dashed grid, hairline rows) */
@@ -1577,32 +1582,33 @@ h3 {
   margin-bottom: 0.4rem;
 }
 
-/* Presenter chart surface overrides */
+/* Presenter chart surface overrides — editorial clay palette, matching dashboard */
 .presenter-shell {
-  --chart-grid: rgba(207, 165, 121, 0.16);
-  --chart-axis: rgba(207, 165, 121, 0.32);
-  --chart-tick: #c8bca6;
-  --chart-positive: #5ed4ad;
-  --chart-primary: #cf6227;
-  --chart-secondary: #b1ad3b;
-  --chart-tertiary: #5ed4ad;
+  --chart-grid: var(--chart-grid, #f0ead9);
+  --chart-axis: var(--chart-axis, #a29883);
+  --chart-tick: var(--chart-tick, #7d7466);
+  --chart-positive: var(--chart-positive, #5ed4ad);
+  --chart-primary: var(--chart-primary, #cf6227);
+  --chart-secondary: var(--chart-secondary, #6e6a0d);
+  --chart-tertiary: var(--chart-tertiary, #2b5e7a);
 }
 
 .presenter-shell .recharts-default-tooltip,
 .presenter-shell .chart-tooltip {
-  background: rgba(29, 21, 16, 0.95) !important;
-  border-color: rgba(207, 165, 121, 0.28) !important;
-  color: #fbf4e4 !important;
+  background: var(--surface) !important;
+  border-color: var(--border-soft) !important;
+  color: var(--text) !important;
+  box-shadow: var(--shadow-2) !important;
 }
 
 .presenter-shell .recharts-tooltip-label,
 .presenter-shell .chart-tooltip__label {
-  color: #fbf4e4 !important;
+  color: var(--text) !important;
 }
 
 .presenter-shell .recharts-tooltip-item,
 .presenter-shell .chart-tooltip__item {
-  color: #e9dcc3 !important;
+  color: var(--text-soft) !important;
 }
 
 @keyframes celebration-sheen {

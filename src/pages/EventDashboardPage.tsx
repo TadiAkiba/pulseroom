@@ -20,12 +20,24 @@ import { Button } from '../components/ui/Button.tsx'
 import { buttonClasses } from '../components/ui/buttonClasses.ts'
 import { Card, CardHeader, CardTitle, CardDescription } from '../components/ui/Card.tsx'
 import { Field, Input, Select, Textarea } from '../components/ui/Field.tsx'
+import { Tabs, TabsList, TabsTrigger } from '../components/ui/Tabs.tsx'
 import { api } from '../lib/api.ts'
 import { parseInteractionFile } from '../lib/interactionImport.ts'
 import { socketUrl } from '../lib/realtime.ts'
 import type { EventSnapshot, InteractionRecord, InteractionType } from '../types.ts'
 
 type PollOption = { label: string; value: number }
+
+const dashboardTabs = ['overview', 'analytics', 'questions', 'polls', 'compose'] as const
+type DashboardTab = (typeof dashboardTabs)[number]
+
+const TAB_LABEL: Record<DashboardTab, string> = {
+  overview: 'Overview',
+  analytics: 'Analytics',
+  questions: 'Questions',
+  polls: 'Polls',
+  compose: 'Compose',
+}
 
 type AnyTooltipEntry = {
   name?: unknown
@@ -153,6 +165,7 @@ export function EventDashboardPage() {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [saving, setSaving] = useState(false)
+  const [activeTab, setActiveTab] = useState<DashboardTab>('overview')
   const [interactionForm, setInteractionForm] = useState({
     type: 'question' as InteractionRecord['type'],
     prompt: '',
@@ -378,367 +391,396 @@ export function EventDashboardPage() {
       {notice ? <Alert variant="success">{notice}</Alert> : null}
       {error ? <Alert variant="danger">{error}</Alert> : null}
 
-      <section className="metric-grid">
-        <MetricCard label="Total responses" value={snapshot.metrics.totalResponses} />
-        <MetricCard label="Questions submitted" value={snapshot.metrics.questionCount} />
-        <MetricCard label="Poll participation" value={`${snapshot.metrics.pollParticipation}%`} />
-        <MetricCard label="Average rating" value={`${snapshot.metrics.averageRating}/5`} />
-        <MetricCard label="Reactions" value={snapshot.metrics.reactionCount} />
-        <MetricCard label="Positive sentiment" value={`${snapshot.analytics.sentiment.positive}%`} accent />
-      </section>
+      <Tabs className="dashboard-tabs">
+        <TabsList>
+          {dashboardTabs.map((tab) => (
+            <TabsTrigger key={tab} active={activeTab === tab} onClick={() => setActiveTab(tab)}>
+              {TAB_LABEL[tab]}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
 
-      <section className="dashboard-two-col">
-        <Card className="chart-panel">
-          <ChartShell
-            eyebrow="Engagement"
-            title="Audience activity over time"
-            meta="Automatic live updates with no refresh required."
-          >
-            <ResponsiveContainer width="100%" height={240}>
-              <LineChart data={snapshot.metrics.timeline} margin={{ top: 8, right: 12, left: -12, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="engagementFill" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor={paletteHook.primary} stopOpacity={0.22} />
-                    <stop offset="100%" stopColor={paletteHook.primary} stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid stroke={paletteHook.grid} vertical={false} />
-                <XAxis
-                  dataKey="time"
-                  stroke={paletteHook.tick}
-                  tickLine={false}
-                  axisLine={{ stroke: paletteHook.axis }}
-                  interval="preserveStartEnd"
-                  fontSize={11}
-                  tick={{ fill: paletteHook.tick }}
-                />
-                <YAxis
-                  stroke={paletteHook.tick}
-                  tickLine={false}
-                  axisLine={false}
-                  allowDecimals={false}
-                  fontSize={11}
-                  tick={{ fill: paletteHook.tick }}
-                  width={34}
-                />
-                <Tooltip
-                  cursor={{ stroke: paletteHook.axis, strokeDasharray: '4 4' }}
-                  labelClassName="chart-tooltip__label"
-                  content={(props) => (
-                    <ChartTooltip
-                      active={props.active}
-                      payload={props.payload as unknown as AnyTooltipEntry[]}
-                      label={props.label}
-                      labelPrefix="Window"
+      {activeTab === 'overview' ? (
+        <section className="metric-grid">
+          <MetricCard label="Total responses" value={snapshot.metrics.totalResponses} />
+          <MetricCard label="Questions submitted" value={snapshot.metrics.questionCount} />
+          <MetricCard label="Poll participation" value={`${snapshot.metrics.pollParticipation}%`} />
+          <MetricCard label="Average rating" value={`${snapshot.metrics.averageRating}/5`} />
+          <MetricCard label="Reactions" value={snapshot.metrics.reactionCount} />
+          <MetricCard label="Positive sentiment" value={`${snapshot.analytics.sentiment.positive}%`} accent />
+        </section>
+      ) : null}
+
+      {activeTab === 'analytics' ? (
+        <>
+          <section className="dashboard-two-col">
+            <Card className="chart-panel">
+              <ChartShell
+                eyebrow="Engagement"
+                title="Audience activity over time"
+                meta="Automatic live updates with no refresh required."
+              >
+                <ResponsiveContainer width="100%" height={260}>
+                  <LineChart data={snapshot.metrics.timeline} margin={{ top: 8, right: 12, left: -12, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="engagementFill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={paletteHook.primary} stopOpacity={0.22} />
+                        <stop offset="100%" stopColor={paletteHook.primary} stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid stroke={paletteHook.grid} vertical={false} />
+                    <XAxis
+                      dataKey="time"
+                      stroke={paletteHook.tick}
+                      tickLine={false}
+                      axisLine={{ stroke: paletteHook.axis }}
+                      interval="preserveStartEnd"
+                      fontSize={11}
+                      tick={{ fill: paletteHook.tick }}
                     />
-                  )}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="value"
-                  name="Responses"
-                  stroke={paletteHook.primary}
-                  strokeWidth={2.5}
-                  dot={false}
-                  activeDot={{ r: 5, strokeWidth: 0, fill: paletteHook.primary }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </ChartShell>
-        </Card>
+                    <YAxis
+                      stroke={paletteHook.tick}
+                      tickLine={false}
+                      axisLine={false}
+                      allowDecimals={false}
+                      fontSize={11}
+                      tick={{ fill: paletteHook.tick }}
+                      width={34}
+                    />
+                    <Tooltip
+                      cursor={{ stroke: paletteHook.axis, strokeDasharray: '4 4' }}
+                      labelClassName="chart-tooltip__label"
+                      content={(props) => (
+                        <ChartTooltip
+                          active={props.active}
+                          payload={props.payload as unknown as AnyTooltipEntry[]}
+                          label={props.label}
+                          labelPrefix="Window"
+                        />
+                      )}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="value"
+                      name="Responses"
+                      stroke={paletteHook.primary}
+                      strokeWidth={2.5}
+                      dot={false}
+                      activeDot={{ r: 5, strokeWidth: 0, fill: paletteHook.primary }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </ChartShell>
+            </Card>
 
-        <Card className="chart-panel">
-          <ChartShell
-            eyebrow="Sentiment"
-            title="Audience sentiment"
-            meta="Automated text analysis, presented as directional signal."
-          >
-            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 180px', gap: '1rem', alignItems: 'center' }}>
-              <ResponsiveContainer width="100%" height={220}>
-                <PieChart>
-                  <Pie
-                    data={sentimentData}
-                    dataKey="value"
-                    nameKey="name"
-                    innerRadius={58}
-                    outerRadius={92}
-                    paddingAngle={4}
-                    strokeWidth={0}
-                  >
+            <Card className="chart-panel">
+              <ChartShell
+                eyebrow="Sentiment"
+                title="Audience sentiment"
+                meta="Automated text analysis, presented as directional signal."
+              >
+                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 200px', gap: '1rem', alignItems: 'center' }}>
+                  <ResponsiveContainer width="100%" height={260}>
+                    <PieChart>
+                      <Pie
+                        data={sentimentData}
+                        dataKey="value"
+                        nameKey="name"
+                        innerRadius={64}
+                        outerRadius={104}
+                        paddingAngle={4}
+                        strokeWidth={0}
+                      >
+                        {sentimentData.map((entry) => (
+                          <Cell
+                            key={entry.name}
+                            fill={
+                              entry.name === 'Positive'
+                                ? paletteHook.positive
+                                : entry.name === 'Neutral'
+                                  ? paletteHook.neutral
+                                  : paletteHook.negative
+                            }
+                          />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        content={(props) => (
+                          <ChartTooltip
+                            active={props.active}
+                            payload={props.payload as unknown as AnyTooltipEntry[]}
+                            label={props.label}
+                          />
+                        )}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div style={{ display: 'grid', gap: '0.55rem' }}>
                     {sentimentData.map((entry) => (
-                      <Cell
-                        key={entry.name}
-                        fill={
-                          entry.name === 'Positive'
-                            ? paletteHook.positive
-                            : entry.name === 'Neutral'
-                              ? paletteHook.neutral
-                              : paletteHook.negative
-                        }
-                      />
+                      <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                        <span
+                          aria-hidden
+                          style={{
+                            width: 10,
+                            height: 10,
+                            borderRadius: 999,
+                            background:
+                              entry.name === 'Positive'
+                                ? paletteHook.positive
+                                : entry.name === 'Neutral'
+                                  ? paletteHook.neutral
+                                  : paletteHook.negative,
+                            flex: '0 0 auto',
+                          }}
+                        />
+                        <span style={{ color: 'var(--text-soft)', fontSize: '0.9rem', flex: '1 1 auto' }}>{entry.name}</span>
+                        <strong
+                          style={{
+                            color: 'var(--text)',
+                            fontVariantNumeric: 'tabular-nums',
+                            fontWeight: 600,
+                            fontSize: '0.98rem',
+                          }}
+                        >
+                          {entry.value}%
+                        </strong>
+                      </div>
                     ))}
-                  </Pie>
-                  <Tooltip
-                    content={(props) => (
-                      <ChartTooltip
-                        active={props.active}
-                        payload={props.payload as unknown as AnyTooltipEntry[]}
-                        label={props.label}
-                      />
-                    )}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-              <div style={{ display: 'grid', gap: '0.55rem' }}>
-                {sentimentData.map((entry) => (
-                  <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-                    <span
-                      aria-hidden
-                      style={{
-                        width: 10,
-                        height: 10,
-                        borderRadius: 999,
-                        background:
-                          entry.name === 'Positive'
-                            ? paletteHook.positive
-                            : entry.name === 'Neutral'
-                              ? paletteHook.neutral
-                              : paletteHook.negative,
-                        flex: '0 0 auto',
-                      }}
-                    />
-                    <span style={{ color: 'var(--text-soft)', fontSize: '0.9rem', flex: '1 1 auto' }}>{entry.name}</span>
-                    <strong
-                      style={{
-                        color: 'var(--text)',
-                        fontVariantNumeric: 'tabular-nums',
-                        fontWeight: 600,
-                        fontSize: '0.98rem',
-                      }}
-                    >
-                      {entry.value}%
-                    </strong>
+                  </div>
+                </div>
+              </ChartShell>
+            </Card>
+          </section>
+
+          <section className="dashboard-three-col">
+            <Card>
+              <CardHeader className="panel-heading">
+                <CardTitle>Word cloud</CardTitle>
+                <CardDescription>Meaningful terms only, scaled by frequency.</CardDescription>
+              </CardHeader>
+              <div className="word-cloud">
+                {snapshot.analytics.wordCloud.length > 0 ? (
+                  snapshot.analytics.wordCloud.map((entry) => (
+                    <span key={entry.word} style={{ fontSize: `${entry.weight}rem` }}>
+                      {entry.word}
+                    </span>
+                  ))
+                ) : (
+                  <p className="muted">Not enough text responses yet for a word cloud.</p>
+                )}
+              </div>
+
+              <div className="insight-block">
+                <h3>Emerging concerns</h3>
+                {snapshot.analytics.emergingConcerns.map((concern) => (
+                  <p key={concern}>{concern}</p>
+                ))}
+              </div>
+            </Card>
+
+            <Card>
+              <CardHeader className="panel-heading">
+                <CardTitle>Top themes</CardTitle>
+                <CardDescription>Topic clusters pulled from text responses.</CardDescription>
+              </CardHeader>
+              <div className="chip-row" style={{ padding: '0 1.25rem 1.25rem' }}>
+                {snapshot.analytics.themes.length > 0 ? (
+                  snapshot.analytics.themes.map((theme) => (
+                    <Badge key={theme.theme} variant="outline">
+                      {theme.theme}
+                    </Badge>
+                  ))
+                ) : (
+                  <p className="muted">Not enough text responses yet to identify dominant themes.</p>
+                )}
+              </div>
+            </Card>
+
+            <Card>
+              <CardHeader className="panel-heading">
+                <CardTitle>Ratings and reactions</CardTitle>
+                <CardDescription>Quick pulse checks from the audience.</CardDescription>
+              </CardHeader>
+              <div className="stack-list">
+                {snapshot.ratingResults.map((rating) => (
+                  <div key={rating.id} className="stat-row">
+                    <div>
+                      <strong>{rating.prompt}</strong>
+                      <p>{rating.responses} responses</p>
+                    </div>
+                    <span>
+                      {rating.average}/{rating.scale}
+                    </span>
+                  </div>
+                ))}
+                {snapshot.reactionTotals.map((reaction) => (
+                  <div key={reaction.label} className="stat-row">
+                    <div>
+                      <strong>{reaction.label}</strong>
+                      <p>Live reaction taps</p>
+                    </div>
+                    <span>{reaction.value}</span>
                   </div>
                 ))}
               </div>
+            </Card>
+          </section>
+        </>
+      ) : null}
+
+      {activeTab === 'questions' ? (
+        <section style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: '1.25rem' }}>
+          <Card>
+            <CardHeader className="panel-heading">
+              <CardTitle>Ask the Room</CardTitle>
+              <CardDescription>Questions and votes update live as the room responds.</CardDescription>
+            </CardHeader>
+            <div className="question-table question-table--header">
+              <span>Question</span>
+              <span>Votes</span>
             </div>
-          </ChartShell>
-        </Card>
-      </section>
-
-      <section className="dashboard-three-col">
-        <Card>
-          <CardHeader className="panel-heading">
-            <CardTitle>Ask the Room</CardTitle>
-            <CardDescription>Questions and votes update live as the room responds.</CardDescription>
-          </CardHeader>
-          <div className="question-table question-table--header">
-            <span>Question</span>
-            <span>Votes</span>
-          </div>
-          <div className="question-list">
-            {snapshot.questionStream.map((question) => (
-              <div key={question.id} className={`question-item ${question.highlighted ? 'highlighted' : ''}`}>
-                <div className="question-item__body">
-                  <strong>{question.text}</strong>
-                  <p>
-                    {question.timeLabel} • {question.moderationState}
-                  </p>
-                </div>
-                <div className="question-vote-pill">▲ {question.votes.up}</div>
-                <div className="question-actions">
-                  <Button type="button" size="sm" variant="secondary" onClick={() => moderate(question.id, 'visible', question.highlighted)}>
-                    Show
-                  </Button>
-                  <Button type="button" size="sm" variant="secondary" onClick={() => moderate(question.id, 'hidden', false)}>
-                    Hide
-                  </Button>
-                  <Button type="button" size="sm" variant="secondary" onClick={() => moderate(question.id, 'answered', false)}>
-                    Answered
-                  </Button>
-                  <Button type="button" size="sm" variant="outline" onClick={() => moderate(question.id, question.moderationState, !question.highlighted)}>
-                    {question.highlighted ? 'Unhighlight' : 'Highlight'}
-                  </Button>
-                  <Button type="button" size="sm" variant="danger" onClick={() => moderate(question.id, 'deleted', false)}>
-                    Delete
-                  </Button>
-                </div>
-              </div>
-            ))}
-            {snapshot.questionStream.length === 0 ? <p className="muted">Questions will appear here as they arrive.</p> : null}
-          </div>
-        </Card>
-
-        <Card>
-          <CardHeader className="panel-heading">
-            <CardTitle>Word cloud</CardTitle>
-            <CardDescription>Meaningful terms only, scaled by frequency.</CardDescription>
-          </CardHeader>
-          <div className="word-cloud">
-            {snapshot.analytics.wordCloud.length > 0 ? (
-              snapshot.analytics.wordCloud.map((entry) => (
-                <span key={entry.word} style={{ fontSize: `${entry.weight}rem` }}>
-                  {entry.word}
-                </span>
-              ))
-            ) : (
-              <p className="muted">Not enough text responses yet for a word cloud.</p>
-            )}
-          </div>
-
-          <div className="insight-block">
-            <h3>Emerging concerns</h3>
-            {snapshot.analytics.emergingConcerns.map((concern) => (
-              <p key={concern}>{concern}</p>
-            ))}
-          </div>
-        </Card>
-
-        <Card>
-          <CardHeader className="panel-heading">
-            <CardTitle>Create interaction</CardTitle>
-            <CardDescription>Add new audience prompts or upload a file of interactions without leaving the dashboard.</CardDescription>
-          </CardHeader>
-          <form className="stack-form" onSubmit={createInteraction}>
-            <Field label="Type">
-              <Select
-                value={interactionForm.type}
-                onChange={(event) => setInteractionForm((current) => ({ ...current, type: event.target.value as InteractionType }))}
-              >
-                <option value="question">Question</option>
-                <option value="feedback">Feedback</option>
-                <option value="rating">Rating</option>
-                <option value="poll">Poll</option>
-                <option value="reaction">Reaction</option>
-              </Select>
-            </Field>
-            <Field label="Prompt">
-              <Textarea
-                rows={3}
-                value={interactionForm.prompt}
-                onChange={(event) => setInteractionForm((current) => ({ ...current, prompt: event.target.value }))}
-                placeholder="Ask your audience something useful"
-              />
-            </Field>
-            {interactionForm.type === 'poll' || interactionForm.type === 'reaction' ? (
-              <Field label="Options">
-                <Textarea
-                  rows={3}
-                  value={interactionForm.options}
-                  onChange={(event) => setInteractionForm((current) => ({ ...current, options: event.target.value }))}
-                  placeholder="Comma-separated options"
-                />
-              </Field>
-            ) : null}
-            <Button type="submit" disabled={saving}>
-              Add interaction
-            </Button>
-          </form>
-          <form className="stack-form import-form" onSubmit={uploadInteractions}>
-            <Field
-              label="Import from file"
-              description="Upload a .json or .csv file with interactions. CSV columns: type, prompt, options, scale, allowMultiple, status, ordering. Use | between options."
-            >
-              <Input name="interaction-file" type="file" accept=".json,.csv,application/json,text/csv" />
-            </Field>
-            <div className="import-actions">
-              <a
-                className={buttonClasses({ variant: 'ghost' })}
-                href="/interaction-import-template.csv"
-                download="interaction-import-template.csv"
-              >
-                Download CSV template
-              </a>
-              <Button type="submit" variant="outline" disabled={saving}>
-                Upload interactions
-              </Button>
-            </div>
-          </form>
-        </Card>
-      </section>
-
-      <section className="dashboard-two-col">
-        <Card className="chart-panel">
-          <ChartShell
-            eyebrow="Polls"
-            title="Poll results"
-            meta="Launch a poll from here and its results will appear instantly on attendee and presenter screens."
-          >
-            {snapshot.pollResults.map((poll) => (
-              <div key={poll.id} className="poll-block">
-                <div className="poll-block__header">
-                  <div>
-                    <strong>{poll.prompt}</strong>
-                    <p>{poll.totalVotes} responses</p>
+            <div className="question-list">
+              {snapshot.questionStream.map((question) => (
+                <div key={question.id} className={`question-item ${question.highlighted ? 'highlighted' : ''}`}>
+                  <div className="question-item__body">
+                    <strong>{question.text}</strong>
+                    <p>
+                      {question.timeLabel} • {question.moderationState}
+                    </p>
                   </div>
-                  <div className="achievement-row">
-                    {poll.active ? <Badge variant="success">Live now</Badge> : null}
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant={poll.active ? 'outline' : 'secondary'}
-                      disabled={saving}
-                      onClick={() => setActivePoll(poll.active ? null : poll.id)}
-                    >
-                      {poll.active ? 'Clear poll' : 'Launch poll'}
+                  <div className="question-vote-pill">▲ {question.votes.up}</div>
+                  <div className="question-actions">
+                    <Button type="button" size="sm" variant="secondary" onClick={() => moderate(question.id, 'visible', question.highlighted)}>
+                      Show
+                    </Button>
+                    <Button type="button" size="sm" variant="secondary" onClick={() => moderate(question.id, 'hidden', false)}>
+                      Hide
+                    </Button>
+                    <Button type="button" size="sm" variant="secondary" onClick={() => moderate(question.id, 'answered', false)}>
+                      Answered
+                    </Button>
+                    <Button type="button" size="sm" variant="outline" onClick={() => moderate(question.id, question.moderationState, !question.highlighted)}>
+                      {question.highlighted ? 'Unhighlight' : 'Highlight'}
+                    </Button>
+                    <Button type="button" size="sm" variant="danger" onClick={() => moderate(question.id, 'deleted', false)}>
+                      Delete
                     </Button>
                   </div>
                 </div>
-                <PollBars options={poll.options} />
-              </div>
-            ))}
-            {snapshot.pollResults.length === 0 ? (
-              <p className="muted" style={{ marginTop: '0.5rem' }}>
-                No polls configured yet.
-              </p>
-            ) : null}
-          </ChartShell>
-        </Card>
-
-        <Card>
-          <CardHeader className="panel-heading">
-            <CardTitle>Ratings and reactions</CardTitle>
-            <CardDescription>Quick pulse checks from the audience.</CardDescription>
-          </CardHeader>
-          <div className="stack-list">
-            {snapshot.ratingResults.map((rating) => (
-              <div key={rating.id} className="stat-row">
-                <div>
-                  <strong>{rating.prompt}</strong>
-                  <p>{rating.responses} responses</p>
-                </div>
-                <span>
-                  {rating.average}/{rating.scale}
-                </span>
-              </div>
-            ))}
-            {snapshot.reactionTotals.map((reaction) => (
-              <div key={reaction.label} className="stat-row">
-                <div>
-                  <strong>{reaction.label}</strong>
-                  <p>Live reaction taps</p>
-                </div>
-                <span>{reaction.value}</span>
-              </div>
-            ))}
-          </div>
-
-          <div className="insight-block">
-            <h3>Top themes</h3>
-            <div className="chip-row">
-              {snapshot.analytics.themes.length > 0 ? (
-                snapshot.analytics.themes.map((theme) => (
-                  <Badge key={theme.theme} variant="outline">
-                    {theme.theme}
-                  </Badge>
-                ))
-              ) : (
-                <p className="muted">Not enough text responses yet to identify dominant themes.</p>
-              )}
+              ))}
+              {snapshot.questionStream.length === 0 ? <p className="muted">Questions will appear here as they arrive.</p> : null}
             </div>
-          </div>
-        </Card>
-      </section>
+          </Card>
+        </section>
+      ) : null}
+
+      {activeTab === 'polls' ? (
+        <section style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: '1.25rem' }}>
+          <Card className="chart-panel">
+            <ChartShell
+              eyebrow="Polls"
+              title="Poll results"
+              meta="Launch a poll from here and its results will appear instantly on attendee and presenter screens."
+            >
+              {snapshot.pollResults.map((poll) => (
+                <div key={poll.id} className="poll-block">
+                  <div className="poll-block__header">
+                    <div>
+                      <strong>{poll.prompt}</strong>
+                      <p>{poll.totalVotes} responses</p>
+                    </div>
+                    <div className="achievement-row">
+                      {poll.active ? <Badge variant="success">Live now</Badge> : null}
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={poll.active ? 'outline' : 'secondary'}
+                        disabled={saving}
+                        onClick={() => setActivePoll(poll.active ? null : poll.id)}
+                      >
+                        {poll.active ? 'Clear poll' : 'Launch poll'}
+                      </Button>
+                    </div>
+                  </div>
+                  <PollBars options={poll.options} />
+                </div>
+              ))}
+              {snapshot.pollResults.length === 0 ? (
+                <p className="muted" style={{ marginTop: '0.5rem' }}>
+                  No polls configured yet. Switch to the Compose tab to create one.
+                </p>
+              ) : null}
+            </ChartShell>
+          </Card>
+        </section>
+      ) : null}
+
+      {activeTab === 'compose' ? (
+        <section style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: '1.25rem' }}>
+          <Card>
+            <CardHeader className="panel-heading">
+              <CardTitle>Create interaction</CardTitle>
+              <CardDescription>Add new audience prompts or upload a file of interactions without leaving the dashboard.</CardDescription>
+            </CardHeader>
+            <form className="stack-form" onSubmit={createInteraction}>
+              <Field label="Type">
+                <Select
+                  value={interactionForm.type}
+                  onChange={(event) => setInteractionForm((current) => ({ ...current, type: event.target.value as InteractionType }))}
+                >
+                  <option value="question">Question</option>
+                  <option value="feedback">Feedback</option>
+                  <option value="rating">Rating</option>
+                  <option value="poll">Poll</option>
+                  <option value="reaction">Reaction</option>
+                </Select>
+              </Field>
+              <Field label="Prompt">
+                <Textarea
+                  rows={3}
+                  value={interactionForm.prompt}
+                  onChange={(event) => setInteractionForm((current) => ({ ...current, prompt: event.target.value }))}
+                  placeholder="Ask your audience something useful"
+                />
+              </Field>
+              {interactionForm.type === 'poll' || interactionForm.type === 'reaction' ? (
+                <Field label="Options">
+                  <Textarea
+                    rows={3}
+                    value={interactionForm.options}
+                    onChange={(event) => setInteractionForm((current) => ({ ...current, options: event.target.value }))}
+                    placeholder="Comma-separated options"
+                  />
+                </Field>
+              ) : null}
+              <Button type="submit" disabled={saving}>
+                Add interaction
+              </Button>
+            </form>
+            <form className="stack-form import-form" onSubmit={uploadInteractions}>
+              <Field
+                label="Import from file"
+                description="Upload a .json or .csv file with interactions. CSV columns: type, prompt, options, scale, allowMultiple, status, ordering. Use | between options."
+              >
+                <Input name="interaction-file" type="file" accept=".json,.csv,application/json,text/csv" />
+              </Field>
+              <div className="import-actions">
+                <a
+                  className={buttonClasses({ variant: 'ghost' })}
+                  href="/interaction-import-template.csv"
+                  download="interaction-import-template.csv"
+                >
+                  Download CSV template
+                </a>
+                <Button type="submit" variant="outline" disabled={saving}>
+                  Upload interactions
+                </Button>
+              </div>
+            </form>
+          </Card>
+        </section>
+      ) : null}
     </main>
   )
 }

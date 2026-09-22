@@ -367,30 +367,46 @@ export function PresenterPage() {
       <section className={`presenter-stage ${totalEngagement >= 100 ? 'presenter-stage--charged' : ''}`}>
         {view === 'questions' ? (
           <div className="presenter-question-grid">
-            {liveSnapshot.presenterQuestions.slice(0, 6).map((question) => (
+            {liveSnapshot.presenterQuestions.map((question) => (
               <article key={question.id} className={`presenter-card ${question.highlighted ? 'highlighted' : ''}`}>
-                <span>
-                  {question.timeLabel} • ▲ {question.votes.up}
+                <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+                  <span style={{ color: 'var(--muted)', fontSize: '0.82rem', letterSpacing: '0.04em', textTransform: 'uppercase', fontWeight: 600 }}>
+                    {question.interactionPrompt}
+                  </span>
+                  <Badge variant={question.moderationState === 'answered' ? 'success' : 'outline'}>
+                    {question.moderationState === 'answered' ? 'Answered' : question.highlighted ? 'Highlighted' : 'Live'}
+                  </Badge>
                 </span>
-                <strong>{question.text}</strong>
+                <strong style={{ marginTop: '0.6rem', display: 'block' }}>{question.text}</strong>
+                <p style={{ marginTop: '0.7rem' }}>
+                  {question.timeLabel} • ▲ {question.votes.up} upvotes • score {question.votes.score}
+                </p>
               </article>
             ))}
             {liveSnapshot.presenterQuestions.length === 0 ? (
-              <div className="presenter-center">Approved audience questions will appear here.</div>
+              <div className="presenter-center">Approved audience questions will appear here. Moderate from the dashboard to surface them on stage.</div>
             ) : null}
           </div>
         ) : null}
 
         {view === 'ideas' ? (
           <div className="presenter-question-grid">
-            {liveSnapshot.ideaFeed.slice(0, 6).map((idea) => (
+            {liveSnapshot.ideaFeed.map((idea) => (
               <article key={idea.id} className="presenter-card presenter-card--gamified">
-                <span>
-                  {idea.team} • {idea.nickname}
+                <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+                  <span style={{ color: 'var(--muted)', fontSize: '0.82rem', letterSpacing: '0.04em', textTransform: 'uppercase', fontWeight: 600 }}>
+                    {idea.interactionPrompt}
+                  </span>
+                  <Badge variant={idea.sentiment === 'positive' ? 'success' : idea.sentiment === 'negative' ? 'danger' : 'outline'}>
+                    {idea.sentiment}
+                  </Badge>
                 </span>
-                <strong>{idea.text}</strong>
+                <strong style={{ marginTop: '0.6rem', display: 'block' }}>{idea.text}</strong>
+                <p style={{ marginTop: '0.5rem' }}>
+                  {idea.team} • {idea.nickname}
+                </p>
                 <p>
-                  Score {idea.votes.score} • {idea.sentiment}
+                  Score {idea.votes.score} • ▲ {idea.votes.up} upvotes • {idea.timeLabel}
                 </p>
               </article>
             ))}

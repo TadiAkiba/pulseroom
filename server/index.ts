@@ -194,32 +194,22 @@ const registerSchema = z.object({
 const attendeeProfileSchema = z.object({
   attendeeKey: z.string().trim().min(8).max(120),
   nickname: z.string().trim().min(2).max(24),
-  team: z.string().trim().min(2).max(40),
 })
 
 function normalizeProfile(input: z.infer<typeof attendeeProfileSchema>) {
   return {
     attendeeKey: input.attendeeKey.trim(),
     nickname: input.nickname.trim(),
-    team: input.team.trim(),
   }
-}
-
-function getConfiguredTeams(event: { config: Record<string, unknown> }) {
-  const rawTeams = Array.isArray(event.config.teams) ? event.config.teams : []
-  const teams = rawTeams.map(String).map((team) => team.trim()).filter(Boolean)
-  return teams.length > 0 ? teams : ['Catalysts', 'Builders', 'Navigators', 'Trailblazers']
 }
 
 function getAttendeeMeta(content: Record<string, unknown>) {
   const attendeeKey = typeof content.attendeeKey === 'string' ? content.attendeeKey : ''
   const nickname = typeof content.nickname === 'string' ? content.nickname : 'Anonymous'
-  const team = typeof content.team === 'string' ? content.team : 'Unassigned'
 
   return {
     attendeeKey,
     nickname,
-    team,
   }
 }
 
@@ -423,7 +413,6 @@ function buildEventSnapshot(eventId: string, includeHidden: boolean) {
   const interactionById = new Map(interactions.map((interaction) => [interaction.id, interaction]))
   const analysisByResponseId = new Map(analyses.map((analysis) => [analysis.responseId, analysis]))
   const voteSummaryByResponseId = new Map<string, { up: number; down: number; score: number }>()
-  const teams = getConfiguredTeams(event)
 
   const usableResponses = responses.filter((response) => response.moderationState !== 'deleted')
   const publicResponses = usableResponses.filter((response) => {
@@ -512,89 +501,20 @@ function buildEventSnapshot(eventId: string, includeHidden: boolean) {
         createdAt: response.createdAt,
         timeLabel: formatTime(response.createdAt),
         nickname: attendee.nickname,
-        team: attendee.team,
         sentiment: analysisByResponseId.get(response.id)?.sentiment ?? 'neutral',
         votes: voteSummary,
       }
     })
     .sort((left, right) => right.votes.score - left.votes.score || right.createdAt.localeCompare(left.createdAt))
 
-  const teamSummary = new Map(
-    teams.map((team) => [
-      team,
-      {
-        team,
-        points: 0,
-        contributors: new Set<string>(),
-        contributions: 0,
-        ideas: 0,
-        questions: 0,
-        votesReceived: 0,
-      },
-    ]),
-  )
   const uniqueParticipants = new Set<string>()
-  const defaultResponsePoints: Record<InteractionType, number> = {
-    question: 5,
-    feedback: 6,
-    poll: 3,
-    rating: 2,
-    reaction: 1,
-  }
-
   for (const response of usableResponses) {
     const attendee = getAttendeeMeta(response.content)
-    if (!attendee.attendeeKey || !attendee.team) {
+    if (!attendee.attendeeKey) {
       continue
     }
-
     uniqueParticipants.add(attendee.attendeeKey)
-    const team = teamSummary.get(attendee.team) ?? {
-      team: attendee.team,
-      points: 0,
-      contributors: new Set<string>(),
-      contributions: 0,
-      ideas: 0,
-      questions: 0,
-      votesReceived: 0,
-    }
-    team.contributors.add(attendee.attendeeKey)
-    team.contributions += 1
-    const interaction = interactionById.get(response.interactionId)
-    const configuredPoints = Number(interaction?.settings.points)
-    team.points += Number.isFinite(configuredPoints) ? configuredPoints : defaultResponsePoints[response.responseType] ?? 1
-
-    if (response.responseType === 'feedback') {
-      if (interaction?.settings.feedEligible !== false) {
-        team.ideas += 1
-        const voteSummary = voteSummaryByResponseId.get(response.id) ?? { up: 0, down: 0, score: 0 }
-        team.votesReceived += voteSummary.up
-        team.points += voteSummary.up * 2
-        team.points -= voteSummary.down
-      }
-    }
-
-    if (response.responseType === 'question') {
-      team.questions += 1
-      const voteSummary = voteSummaryByResponseId.get(response.id) ?? { up: 0, down: 0, score: 0 }
-      team.votesReceived += voteSummary.up
-      team.points += voteSummary.up
-    }
-
-    teamSummary.set(team.team, team)
   }
-
-  const teamLeaderboard = [...teamSummary.values()]
-    .map((team) => ({
-      team: team.team,
-      points: team.points,
-      contributors: team.contributors.size,
-      contributions: team.contributions,
-      ideas: team.ideas,
-      questions: team.questions,
-      votesReceived: team.votesReceived,
-    }))
-    .sort((left, right) => right.points - left.points || right.contributions - left.contributions || left.team.localeCompare(right.team))
 
   const activePollInteractionId = getActivePollInteractionId(event)
   const pollResults = interactions
@@ -692,7 +612,6 @@ function buildEventSnapshot(eventId: string, includeHidden: boolean) {
       )
       .slice(0, 12),
     ideaFeed: ideaFeed.slice(0, 9),
-    teamLeaderboard,
     activePoll,
     pollResults,
     ratingResults,
@@ -1286,7 +1205,7 @@ app.get('/api/events/code/:code', (req, res) => {
     snapshot,
     privacy: {
       notice:
-        'Responses stay anonymous. The app stores your chosen nickname, team, submissions, vote activity, timestamps, moderation state, and derived analysis for this room, but does not collect names, emails, or attendee accounts.',
+        'Responses stay anonymous. The app stores your chosen nickname, submissions, vote activity, timestamps, moderation state, and derived analysis for this room, but does not collect names, emails, or attendee accounts.',
     },
     convex: {
       enabled: config.enableConvexPublicSync,
@@ -1321,14 +1240,10 @@ app.post('/api/events/code/:code/responses', (req, res) => {
 
   const parsedAttendee = attendeeProfileSchema.safeParse(req.body?.attendee)
   if (!parsedAttendee.success) {
-    res.status(400).json({ error: 'Choose an anonymous nickname and team before joining the townhall.' })
+    res.status(400).json({ error: 'Choose an anonymous nickname before joining the townhall.' })
     return
   }
   const attendee = normalizeProfile(parsedAttendee.data)
-  if (!getConfiguredTeams(event).includes(attendee.team)) {
-    res.status(400).json({ error: 'Choose a valid townhall team.' })
-    return
-  }
 
   const interaction = getInteraction(String(req.body?.interactionId ?? ''))
   if (!interaction || interaction.eventId !== event.id || interaction.status !== 'active') {

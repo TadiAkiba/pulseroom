@@ -522,7 +522,6 @@ export function createEvent(input: {
     config: {
       attendeePrompt: 'Join the AI townhall, choose an anonymous nickname, and help shape the next move.',
       showCounters: true,
-      teams: ['Catalysts', 'Builders', 'Navigators', 'Trailblazers'],
     },
     isDemo: Boolean(input.isDemo),
     createdAt: timestamp,
@@ -1009,25 +1008,25 @@ export function ensureDemoEvent(organizerId?: string) {
       interactionId: feedbackIdea.id,
       responseType: 'feedback' as const,
       moderationState: 'visible' as const,
-      content: { text: 'More small-group discussions to turn passive listening into active sharing.', attendeeKey: 'demo-1', nickname: 'BrightNova42', team: 'Catalysts' },
+      content: { text: 'More small-group discussions to turn passive listening into active sharing.', attendeeKey: 'demo-1', nickname: 'BrightNova42' },
     },
     {
       interactionId: feedbackIdea.id,
       responseType: 'feedback' as const,
       moderationState: 'visible' as const,
-      content: { text: 'Live polls at 15-minute intervals — they keep the energy high and give people a voice.', attendeeKey: 'demo-2', nickname: 'SignalPulse58', team: 'Builders' },
+      content: { text: 'Live polls at 15-minute intervals — they keep the energy high and give people a voice.', attendeeKey: 'demo-2', nickname: 'SignalPulse58' },
     },
     {
       interactionId: askTheRoom.id,
       responseType: 'question' as const,
       moderationState: 'visible' as const,
-      content: { text: 'How do we balance short-term delivery speed with long-term platform quality?', attendeeKey: 'demo-3', nickname: 'CuriousEcho21', team: 'Navigators' },
+      content: { text: 'How do we balance short-term delivery speed with long-term platform quality?', attendeeKey: 'demo-3', nickname: 'CuriousEcho21' },
     },
     {
       interactionId: askTheRoom.id,
       responseType: 'question' as const,
       moderationState: 'answered' as const,
-      content: { text: 'When can we expect the notes and recordings from each session?', attendeeKey: 'demo-4', nickname: 'BoldVector33', team: 'Trailblazers' },
+      content: { text: 'When can we expect the notes and recordings from each session?', attendeeKey: 'demo-4', nickname: 'BoldVector33' },
     },
     ...[pulseRating.id].flatMap((interactionId) =>
       [5, 4, 4, 5, 3, 5, 4].map((value, offset) => ({
@@ -1038,16 +1037,15 @@ export function ensureDemoEvent(organizerId?: string) {
           value,
           attendeeKey: `demo-rating-${offset}`,
           nickname: `DemoRating${offset}`,
-          team: ['Catalysts', 'Builders', 'Navigators', 'Trailblazers', 'Catalysts', 'Builders', 'Navigators'][offset],
         },
       })),
     ),
     ...[
-      { interactionId: livePoll.id, selections: ['Customer experience'], team: 'Catalysts' },
-      { interactionId: livePoll.id, selections: ['Employee experience'], team: 'Builders' },
-      { interactionId: livePoll.id, selections: ['Productivity'], team: 'Builders' },
-      { interactionId: livePoll.id, selections: ['Revenue growth'], team: 'Navigators' },
-      { interactionId: livePoll.id, selections: ['Cost efficiency'], team: 'Trailblazers' },
+      { interactionId: livePoll.id, selections: ['Customer experience'] },
+      { interactionId: livePoll.id, selections: ['Employee experience'] },
+      { interactionId: livePoll.id, selections: ['Productivity'] },
+      { interactionId: livePoll.id, selections: ['Revenue growth'] },
+      { interactionId: livePoll.id, selections: ['Cost efficiency'] },
     ].map((item, index) => ({
       interactionId: item.interactionId,
       responseType: 'poll' as const,
@@ -1056,7 +1054,6 @@ export function ensureDemoEvent(organizerId?: string) {
         selections: item.selections,
         attendeeKey: `demo-poll-${index}`,
         nickname: `DemoPoll${index}`,
-        team: item.team,
       },
     })),
   ]

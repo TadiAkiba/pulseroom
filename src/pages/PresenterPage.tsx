@@ -27,7 +27,7 @@ import { connectPublicSocket } from '../lib/socketHelpers.ts'
 import { convexQueries, isConvexEnabled, setConvexRuntimeConfig } from '../lib/convex.ts'
 import type { EventSnapshot } from '../types.ts'
 
-const views = ['questions', 'ideas', 'leaderboard', 'word-cloud', 'sentiment', 'polls', 'ratings', 'engagement', 'insights'] as const
+const views = ['questions', 'ideas', 'word-cloud', 'sentiment', 'polls', 'ratings', 'engagement', 'insights'] as const
 type PresenterView = (typeof views)[number]
 const presenterMilestones = [10, 25, 50, 100, 200]
 
@@ -322,7 +322,7 @@ export function PresenterPage() {
                 </span>
                 <strong style={{ marginTop: '0.6rem', display: 'block' }}>{idea.text}</strong>
                 <p style={{ marginTop: '0.5rem' }}>
-                  {idea.team} • {idea.nickname}
+                  {idea.nickname}
                 </p>
                 <p>
                   Score {idea.votes.score} • ▲ {idea.votes.up} upvotes • {idea.timeLabel}
@@ -332,23 +332,6 @@ export function PresenterPage() {
             {liveSnapshot.ideaFeed.length === 0 ? (
               <div className="presenter-center">Ideas and opportunities will appear here as attendees share them.</div>
             ) : null}
-          </div>
-        ) : null}
-
-        {view === 'leaderboard' ? (
-          <div className="presenter-metric-grid">
-            {liveSnapshot.teamLeaderboard.map((entry, index) => (
-              <article key={entry.team} className="presenter-card presenter-card--gamified">
-                <span>#{index + 1}</span>
-                <strong>{entry.team}</strong>
-                <p>
-                  {entry.points} pts • {entry.contributors} contributors
-                </p>
-                <p>
-                  {entry.contributions} actions • {entry.votesReceived} upvotes earned
-                </p>
-              </article>
-            ))}
           </div>
         ) : null}
 

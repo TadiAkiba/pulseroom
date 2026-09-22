@@ -5,10 +5,7 @@ import { Alert } from '../components/ui/Alert.tsx'
 import { Badge } from '../components/ui/Badge.tsx'
 import { Button } from '../components/ui/Button.tsx'
 import { Field, Input } from '../components/ui/Field.tsx'
-import { api } from '../lib/api.ts'
-import type { AnonymousAttendeeProfile, EventPageData } from '../types.ts'
-
-const defaultTeams = ['Catalysts', 'Builders', 'Navigators', 'Trailblazers']
+import type { AnonymousAttendeeProfile } from '../types.ts'
 
 function createAttendeeKey() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -44,12 +41,6 @@ function setStoredProfile(code: string, profile: AnonymousAttendeeProfile) {
   localStorage.setItem(getProfileStorageKey(code), JSON.stringify(profile))
 }
 
-function getEventTeams(data: EventPageData | null) {
-  const rawTeams = Array.isArray(data?.event?.config?.teams) ? data.event.config.teams : []
-  const teams = rawTeams.map(String).map((team) => team.trim()).filter(Boolean)
-  return teams.length > 0 ? teams : defaultTeams
-}
-
 export function JoinPage() {
   const navigate = useNavigate()
   const initialCodeStored = useMemo(() => '', [])
@@ -74,14 +65,10 @@ export function JoinPage() {
         throw new Error('Choose a nickname with at least 2 characters.')
       }
 
-      const data = await api.getEventByCode(normalizedCode)
-      const teams = getEventTeams(data)
-
       const existing = getStoredProfile(normalizedCode)
       const profile: AnonymousAttendeeProfile = {
         attendeeKey: existing?.attendeeKey ?? createAttendeeKey(),
         nickname: trimmedNickname,
-        team: existing?.team && teams.includes(existing.team) ? existing.team : teams[0] ?? defaultTeams[0],
       }
       setStoredProfile(normalizedCode, profile)
       navigate(`/event/${normalizedCode}`)

@@ -33,7 +33,6 @@ export type MetricTimelinePoint = {
 export type AnonymousAttendeeProfile = {
   attendeeKey: string
   nickname: string
-  team: string
 }
 
 export type IdeaFeedItem = {
@@ -44,23 +43,12 @@ export type IdeaFeedItem = {
   createdAt: string
   timeLabel: string
   nickname: string
-  team: string
   sentiment: 'positive' | 'neutral' | 'negative'
   votes: {
     up: number
     down: number
     score: number
   }
-}
-
-export type TeamLeaderboardEntry = {
-  team: string
-  points: number
-  contributors: number
-  contributions: number
-  ideas: number
-  questions: number
-  votesReceived: number
 }
 
 export type EventSnapshot = {
@@ -119,7 +107,6 @@ export type EventSnapshot = {
     }
   }>
   ideaFeed: IdeaFeedItem[]
-  teamLeaderboard: TeamLeaderboardEntry[]
   activePoll: {
     id: string
     prompt: string

@@ -112,12 +112,6 @@ function generateNickname() {
   return `${adjective}${noun}${suffix}`
 }
 
-function getEventTeams(snapshot: EventSnapshot | null) {
-  const rawTeams = Array.isArray(snapshot?.event.config.teams) ? snapshot?.event.config.teams : []
-  const teams = rawTeams.map(String).map((team) => team.trim()).filter(Boolean)
-  return teams.length > 0 ? teams : ['Catalysts', 'Builders', 'Navigators', 'Trailblazers']
-}
-
 function getInteractionFormKey(interaction: InteractionRecord) {
   return typeof interaction.settings.formKey === 'string' ? interaction.settings.formKey : interaction.type
 }
@@ -179,14 +173,12 @@ export function AttendeePage() {
   const [profile, setProfile] = useState<AnonymousAttendeeProfile | null>(initialProfile)
   const [draftProfile, setDraftProfile] = useState({
     nickname: initialProfile?.nickname ?? generateNickname(),
-    team: initialProfile?.team ?? 'Catalysts',
   })
   const convexLoaded = convexOverride !== undefined
   const liveSnapshot = convexLoaded && convexOverride !== null
     ? convexOverride
     : snapshot
   const progress = progressByCode[code] ?? getStoredProgress(code)
-  const teams = useMemo(() => getEventTeams(liveSnapshot), [liveSnapshot])
   const townhallInteractions = useMemo(
     () => data?.interactions.filter((interaction) => getInteractionFormKey(interaction) !== 'qa') ?? [],
     [data],
@@ -215,10 +207,8 @@ export function AttendeePage() {
         setSnapshot(response.snapshot)
         setCurrentIndex(0)
         setLoading(false)
-        const nextTeams = getEventTeams(response.snapshot)
         setDraftProfile((current) => ({
           nickname: current.nickname || generateNickname(),
-          team: nextTeams.includes(current.team) ? current.team : nextTeams[0] ?? 'Catalysts',
         }))
 
         const lifecycle = connectPublicSocket(response.event.id, (nextSnapshot: EventSnapshot) =>
@@ -238,7 +228,7 @@ export function AttendeePage() {
 
   async function submit(interaction: InteractionRecord, payload: Record<string, unknown>) {
     if (!profile) {
-      setError('Pick your anonymous nickname and team before participating.')
+      setError('Pick your anonymous nickname before participating.')
       return
     }
 
@@ -277,7 +267,7 @@ export function AttendeePage() {
 
   async function voteIdea(responseId: string, direction: 'up' | 'down') {
     if (!profile) {
-      setError('Pick your anonymous nickname and team before voting.')
+      setError('Pick your anonymous nickname before voting.')
       return
     }
 
@@ -298,25 +288,20 @@ export function AttendeePage() {
       setError('Choose a nickname with at least 2 characters.')
       return
     }
-    if (!teams.includes(draftProfile.team)) {
-      setError('Choose a valid townhall team.')
-      return
-    }
 
     const nextProfile: AnonymousAttendeeProfile = {
       attendeeKey: profile?.attendeeKey ?? createAttendeeKey(),
       nickname,
-      team: draftProfile.team,
     }
     setProfile(nextProfile)
     setStoredProfile(code, nextProfile)
-    setStatus(`You are in as ${nextProfile.nickname} on ${nextProfile.team}.`)
+    setStatus(`You are in as ${nextProfile.nickname}.`)
     setError('')
   }
 
   async function upvoteQuestion(responseId: string) {
     if (!profile) {
-      setError('Pick your anonymous nickname and team before voting.')
+      setError('Pick your anonymous nickname before voting.')
       return
     }
 
@@ -456,7 +441,6 @@ export function AttendeePage() {
           {profile ? (
             <div className="achievement-row">
               <Badge variant="success">{profile.nickname}</Badge>
-              <Badge variant="info">{profile.team}</Badge>
               <Badge variant="outline">{level}</Badge>
             </div>
           ) : null}
@@ -478,7 +462,6 @@ export function AttendeePage() {
       {!profile ? (
         <ProfileSetupCard
           draft={draftProfile}
-          teams={teams}
           onChange={setDraftProfile}
           onSave={saveProfile}
         />
@@ -676,7 +659,6 @@ export function AttendeePage() {
                   {liveSnapshot.ideaFeed.map((idea) => (
                     <article key={idea.id} className="idea-card">
                       <div className="achievement-row">
-                        <Badge variant="info">{idea.team}</Badge>
                         <Badge variant="outline">{idea.nickname}</Badge>
                         <Badge variant={idea.sentiment === 'positive' ? 'success' : idea.sentiment === 'negative' ? 'danger' : 'warning'}>
                           {idea.sentiment}
@@ -698,26 +680,6 @@ export function AttendeePage() {
                     </article>
                   ))}
                   {liveSnapshot.ideaFeed.length === 0 ? <p className="muted">Ideas will appear here as the room starts sharing.</p> : null}
-                </div>
-              </Card>
-
-              <Card className="townhall-card">
-                <span className="eyebrow">Team leaderboard</span>
-                <h3>AI Champions</h3>
-                <div className="leaderboard-list">
-                  {liveSnapshot.teamLeaderboard.map((entry, index) => (
-                    <article key={entry.team} className="leaderboard-row">
-                      <div>
-                        <strong>
-                          #{index + 1} {entry.team}
-                        </strong>
-                        <p>
-                          {entry.contributors} contributors • {entry.contributions} actions • {entry.votesReceived} upvotes earned
-                        </p>
-                      </div>
-                      <Badge variant={index === 0 ? 'success' : 'outline'}>{entry.points} pts</Badge>
-                    </article>
-                  ))}
                 </div>
               </Card>
             </div>

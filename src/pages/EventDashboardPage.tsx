@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { FormEvent } from 'react'
+import type { FormEvent, ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { io, type Socket } from 'socket.io-client'
 import {
-  Bar,
-  BarChart,
   CartesianGrid,
   Cell,
   Line,
@@ -25,9 +23,127 @@ import { Field, Input, Select, Textarea } from '../components/ui/Field.tsx'
 import { api } from '../lib/api.ts'
 import { parseInteractionFile } from '../lib/interactionImport.ts'
 import { socketUrl } from '../lib/realtime.ts'
-import type { EventSnapshot } from '../types.ts'
+import type { EventSnapshot, InteractionRecord, InteractionType } from '../types.ts'
 
-const sentimentColors = ['#34d399', '#a78bfa', '#fb7185']
+type PollOption = { label: string; value: number }
+
+type AnyTooltipEntry = {
+  name?: unknown
+  dataKey?: unknown
+  value?: unknown
+  color?: unknown
+}
+
+function cssVar(name: string) {
+  const match = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+  return match || '#8a8070'
+}
+
+function resolvePaletteCssVar(token: string, fallback: string) {
+  if (typeof window === 'undefined') return fallback
+  return cssVar(token) || fallback
+}
+
+function ChartTooltip({
+  active,
+  payload,
+  label,
+  labelPrefix,
+}: {
+  active?: boolean
+  payload?: readonly AnyTooltipEntry[]
+  label?: unknown
+  labelPrefix?: string
+}) {
+  if (!active || !payload || payload.length === 0) return null
+  const first = payload[0]
+  const seriesColor = typeof first?.color === 'string' ? first.color : 'var(--chart-primary)'
+  return (
+    <div className="chart-tooltip">
+      <div className="chart-tooltip__label">
+        {labelPrefix ? `${labelPrefix} ${String(label ?? '')}` : String(label ?? '')}
+      </div>
+      {payload.map((entry, index) => (
+        <div key={`${String(entry.dataKey)}-${index}`} className="chart-tooltip__item">
+          <span className="chart-tooltip__dot" style={{ background: seriesColor }} />
+          <span style={{ color: 'var(--text-soft)', flex: '0 0 auto' }}>
+            {String(entry.name ?? entry.dataKey)}:
+          </span>
+          <strong
+            style={{
+              marginLeft: 'auto',
+              color: 'var(--text)',
+              fontVariantNumeric: 'tabular-nums',
+              fontWeight: 600,
+            }}
+          >
+            {typeof entry.value === 'number' && Number.isInteger(entry.value)
+              ? entry.value
+              : typeof entry.value === 'number'
+                ? entry.value.toFixed(1)
+                : String(entry.value)}
+          </strong>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function ChartShell({
+  eyebrow,
+  title,
+  meta,
+  children,
+  className = '',
+}: {
+  eyebrow?: string
+  title: string
+  meta?: ReactNode
+  children: ReactNode
+  className?: string
+}) {
+  return (
+    <div className={`chart-shell ${className}`}>
+      <div className="chart-shell__header">
+        <div style={{ minWidth: 0 }}>
+          {eyebrow ? <div className="chart-shell__eyebrow">{eyebrow}</div> : null}
+          <div className="chart-shell__title">{title}</div>
+          {meta ? <div className="chart-shell__meta">{meta}</div> : null}
+        </div>
+      </div>
+      {children}
+    </div>
+  )
+}
+
+function PollBars({ options }: { options: PollOption[] }) {
+  const total = options.reduce((acc, o) => acc + Math.max(0, o.value), 0)
+  const max = options.reduce((acc, o) => Math.max(acc, o.value), 0)
+  return (
+    <div className="poll-bars">
+      {options.map((option) => {
+        const pct = total > 0 ? Math.round((option.value / total) * 100) : 0
+        const fillPct = max > 0 ? Math.max(4, (option.value / max) * 100) : 0
+        return (
+          <div key={option.label} className="poll-bar" title={option.label}>
+            <div style={{ minWidth: 0 }}>
+              <div className="poll-bar__label" title={option.label}>
+                {option.label}
+              </div>
+              <div className="poll-bar__track">
+                <div className="poll-bar__fill" style={{ width: `${fillPct}%` }} />
+              </div>
+            </div>
+            <div className="poll-bar__value">
+              <span className="poll-bar__count">{option.value}</span>
+              <span className="poll-bar__pct">{pct}%</span>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
 
 export function EventDashboardPage() {
   const { eventId = '' } = useParams()
@@ -38,7 +154,7 @@ export function EventDashboardPage() {
   const [notice, setNotice] = useState('')
   const [saving, setSaving] = useState(false)
   const [interactionForm, setInteractionForm] = useState({
-    type: 'question',
+    type: 'question' as InteractionRecord['type'],
     prompt: '',
     options: 'Option A, Option B',
   })
@@ -189,11 +305,25 @@ export function EventDashboardPage() {
     }
 
     return [
-      { name: 'Positive', value: snapshot.analytics.sentiment.positive },
-      { name: 'Neutral', value: snapshot.analytics.sentiment.neutral },
-      { name: 'Negative', value: snapshot.analytics.sentiment.negative },
+      { name: 'Positive', label: 'Positive', value: snapshot.analytics.sentiment.positive },
+      { name: 'Neutral', label: 'Neutral', value: snapshot.analytics.sentiment.neutral },
+      { name: 'Negative', label: 'Negative', value: snapshot.analytics.sentiment.negative },
     ]
   }, [snapshot])
+
+  const paletteHook = useMemo(
+    () => ({
+      positive: resolvePaletteCssVar('--chart-positive', '#5ed4ad'),
+      neutral: resolvePaletteCssVar('--chart-neutral', '#c9bfa8'),
+      negative: resolvePaletteCssVar('--chart-negative', '#e28a8a'),
+      primary: resolvePaletteCssVar('--chart-primary', '#cf6227'),
+      secondary: resolvePaletteCssVar('--chart-secondary', '#6e6a0d'),
+      grid: resolvePaletteCssVar('--chart-grid', '#f0ead9'),
+      axis: resolvePaletteCssVar('--chart-axis', '#a29883'),
+      tick: resolvePaletteCssVar('--chart-tick', '#7d7466'),
+    }),
+    [snapshot?.event.id],
+  )
 
   if (loading) {
     return (
@@ -259,36 +389,140 @@ export function EventDashboardPage() {
 
       <section className="dashboard-two-col">
         <Card className="chart-panel">
-          <CardHeader className="panel-heading">
-            <CardTitle>Engagement over time</CardTitle>
-            <CardDescription>Automatic live updates with no refresh required.</CardDescription>
-          </CardHeader>
-          <ResponsiveContainer width="100%" height={260}>
-            <LineChart data={snapshot.metrics.timeline}>
-              <CartesianGrid stroke="#243147" strokeDasharray="3 3" />
-              <XAxis dataKey="time" stroke="#94a3b8" />
-              <YAxis stroke="#94a3b8" allowDecimals={false} />
-              <Tooltip />
-              <Line type="monotone" dataKey="value" stroke="#7c3aed" strokeWidth={3} />
-            </LineChart>
-          </ResponsiveContainer>
+          <ChartShell
+            eyebrow="Engagement"
+            title="Audience activity over time"
+            meta="Automatic live updates with no refresh required."
+          >
+            <ResponsiveContainer width="100%" height={240}>
+              <LineChart data={snapshot.metrics.timeline} margin={{ top: 8, right: 12, left: -12, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="engagementFill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={paletteHook.primary} stopOpacity={0.22} />
+                    <stop offset="100%" stopColor={paletteHook.primary} stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid stroke={paletteHook.grid} vertical={false} />
+                <XAxis
+                  dataKey="time"
+                  stroke={paletteHook.tick}
+                  tickLine={false}
+                  axisLine={{ stroke: paletteHook.axis }}
+                  interval="preserveStartEnd"
+                  fontSize={11}
+                  tick={{ fill: paletteHook.tick }}
+                />
+                <YAxis
+                  stroke={paletteHook.tick}
+                  tickLine={false}
+                  axisLine={false}
+                  allowDecimals={false}
+                  fontSize={11}
+                  tick={{ fill: paletteHook.tick }}
+                  width={34}
+                />
+                <Tooltip
+                  cursor={{ stroke: paletteHook.axis, strokeDasharray: '4 4' }}
+                  labelClassName="chart-tooltip__label"
+                  content={(props) => (
+                    <ChartTooltip
+                      active={props.active}
+                      payload={props.payload as unknown as AnyTooltipEntry[]}
+                      label={props.label}
+                      labelPrefix="Window"
+                    />
+                  )}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="value"
+                  name="Responses"
+                  stroke={paletteHook.primary}
+                  strokeWidth={2.5}
+                  dot={false}
+                  activeDot={{ r: 5, strokeWidth: 0, fill: paletteHook.primary }}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </ChartShell>
         </Card>
 
         <Card className="chart-panel">
-          <CardHeader className="panel-heading">
-            <CardTitle>Sentiment distribution</CardTitle>
-            <CardDescription>Automated text analysis, presented as directional signal.</CardDescription>
-          </CardHeader>
-          <ResponsiveContainer width="100%" height={260}>
-            <PieChart>
-              <Pie data={sentimentData} dataKey="value" innerRadius={65} outerRadius={95}>
-                {sentimentData.map((entry, index) => (
-                  <Cell key={entry.name} fill={sentimentColors[index]} />
+          <ChartShell
+            eyebrow="Sentiment"
+            title="Audience sentiment"
+            meta="Automated text analysis, presented as directional signal."
+          >
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 180px', gap: '1rem', alignItems: 'center' }}>
+              <ResponsiveContainer width="100%" height={220}>
+                <PieChart>
+                  <Pie
+                    data={sentimentData}
+                    dataKey="value"
+                    nameKey="name"
+                    innerRadius={58}
+                    outerRadius={92}
+                    paddingAngle={4}
+                    strokeWidth={0}
+                  >
+                    {sentimentData.map((entry) => (
+                      <Cell
+                        key={entry.name}
+                        fill={
+                          entry.name === 'Positive'
+                            ? paletteHook.positive
+                            : entry.name === 'Neutral'
+                              ? paletteHook.neutral
+                              : paletteHook.negative
+                        }
+                      />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    content={(props) => (
+                      <ChartTooltip
+                        active={props.active}
+                        payload={props.payload as unknown as AnyTooltipEntry[]}
+                        label={props.label}
+                      />
+                    )}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+              <div style={{ display: 'grid', gap: '0.55rem' }}>
+                {sentimentData.map((entry) => (
+                  <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                    <span
+                      aria-hidden
+                      style={{
+                        width: 10,
+                        height: 10,
+                        borderRadius: 999,
+                        background:
+                          entry.name === 'Positive'
+                            ? paletteHook.positive
+                            : entry.name === 'Neutral'
+                              ? paletteHook.neutral
+                              : paletteHook.negative,
+                        flex: '0 0 auto',
+                      }}
+                    />
+                    <span style={{ color: 'var(--text-soft)', fontSize: '0.9rem', flex: '1 1 auto' }}>{entry.name}</span>
+                    <strong
+                      style={{
+                        color: 'var(--text)',
+                        fontVariantNumeric: 'tabular-nums',
+                        fontWeight: 600,
+                        fontSize: '0.98rem',
+                      }}
+                    >
+                      {entry.value}%
+                    </strong>
+                  </div>
                 ))}
-              </Pie>
-              <Tooltip />
-            </PieChart>
-          </ResponsiveContainer>
+              </div>
+            </div>
+          </ChartShell>
         </Card>
       </section>
 
@@ -369,7 +603,7 @@ export function EventDashboardPage() {
             <Field label="Type">
               <Select
                 value={interactionForm.type}
-                onChange={(event) => setInteractionForm((current) => ({ ...current, type: event.target.value }))}
+                onChange={(event) => setInteractionForm((current) => ({ ...current, type: event.target.value as InteractionType }))}
               >
                 <option value="question">Question</option>
                 <option value="feedback">Feedback</option>
@@ -425,42 +659,40 @@ export function EventDashboardPage() {
 
       <section className="dashboard-two-col">
         <Card className="chart-panel">
-          <CardHeader className="panel-heading">
-            <CardTitle>Poll results</CardTitle>
-            <CardDescription>Launch a poll from here and its results will appear instantly on attendee and presenter screens.</CardDescription>
-          </CardHeader>
-          {snapshot.pollResults.map((poll) => (
-            <div key={poll.id} className="poll-block">
-              <div className="poll-block__header">
-                <div>
-                  <strong>{poll.prompt}</strong>
-                  <p>{poll.totalVotes} responses</p>
+          <ChartShell
+            eyebrow="Polls"
+            title="Poll results"
+            meta="Launch a poll from here and its results will appear instantly on attendee and presenter screens."
+          >
+            {snapshot.pollResults.map((poll) => (
+              <div key={poll.id} className="poll-block">
+                <div className="poll-block__header">
+                  <div>
+                    <strong>{poll.prompt}</strong>
+                    <p>{poll.totalVotes} responses</p>
+                  </div>
+                  <div className="achievement-row">
+                    {poll.active ? <Badge variant="success">Live now</Badge> : null}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={poll.active ? 'outline' : 'secondary'}
+                      disabled={saving}
+                      onClick={() => setActivePoll(poll.active ? null : poll.id)}
+                    >
+                      {poll.active ? 'Clear poll' : 'Launch poll'}
+                    </Button>
+                  </div>
                 </div>
-                <div className="achievement-row">
-                  {poll.active ? <Badge variant="success">Live now</Badge> : null}
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={poll.active ? 'outline' : 'secondary'}
-                    disabled={saving}
-                    onClick={() => setActivePoll(poll.active ? null : poll.id)}
-                  >
-                    {poll.active ? 'Clear poll' : 'Launch poll'}
-                  </Button>
-                </div>
+                <PollBars options={poll.options} />
               </div>
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={poll.options}>
-                  <CartesianGrid stroke="#243147" strokeDasharray="3 3" />
-                  <XAxis dataKey="label" stroke="#94a3b8" interval={0} angle={-8} height={60} textAnchor="end" />
-                  <YAxis stroke="#94a3b8" allowDecimals={false} />
-                  <Tooltip />
-                  <Bar dataKey="value" fill="#22d3ee" radius={[8, 8, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          ))}
-          {snapshot.pollResults.length === 0 ? <p className="muted">No polls configured yet.</p> : null}
+            ))}
+            {snapshot.pollResults.length === 0 ? (
+              <p className="muted" style={{ marginTop: '0.5rem' }}>
+                No polls configured yet.
+              </p>
+            ) : null}
+          </ChartShell>
         </Card>
 
         <Card>

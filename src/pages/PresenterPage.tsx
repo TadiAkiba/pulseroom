@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import type { ReactNode } from 'react'
 import { ConvexProvider, useQuery } from 'convex/react'
 import { useParams } from 'react-router-dom'
 import { io, type Socket } from 'socket.io-client'
@@ -6,6 +7,7 @@ import {
   Bar,
   BarChart,
   CartesianGrid,
+  Cell,
   Line,
   LineChart,
   ResponsiveContainer,
@@ -23,6 +25,134 @@ import type { EventSnapshot } from '../types.ts'
 const views = ['questions', 'ideas', 'leaderboard', 'word-cloud', 'sentiment', 'polls', 'ratings', 'engagement', 'insights'] as const
 type PresenterView = (typeof views)[number]
 const presenterMilestones = [10, 25, 50, 100, 200]
+
+type PollOption = { label: string; value: number }
+
+type AnyTooltipEntry = {
+  name?: unknown
+  dataKey?: unknown
+  value?: unknown
+  color?: unknown
+}
+
+function presenterCssVar(name: string, fallback: string) {
+  if (typeof window === 'undefined') return fallback
+  const match = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+  return match || fallback
+}
+
+function ChartTooltip({
+  active,
+  payload,
+  label,
+  labelPrefix,
+}: {
+  active?: boolean
+  payload?: readonly AnyTooltipEntry[]
+  label?: unknown
+  labelPrefix?: string
+}) {
+  if (!active || !payload || payload.length === 0) return null
+  const first = payload[0]
+  const seriesColor = typeof first?.color === 'string' ? first.color : 'var(--chart-primary)'
+  return (
+    <div className="chart-tooltip">
+      <div className="chart-tooltip__label">
+        {labelPrefix ? `${labelPrefix} ${String(label ?? '')}` : String(label ?? '')}
+      </div>
+      {payload.map((entry, index) => (
+        <div key={`${String(entry.dataKey)}-${index}`} className="chart-tooltip__item">
+          <span className="chart-tooltip__dot" style={{ background: seriesColor }} />
+          <span style={{ color: 'var(--text-soft)', flex: '0 0 auto' }}>
+            {String(entry.name ?? entry.dataKey)}:
+          </span>
+          <strong
+            style={{
+              marginLeft: 'auto',
+              color: 'var(--text)',
+              fontVariantNumeric: 'tabular-nums',
+              fontWeight: 600,
+            }}
+          >
+            {typeof entry.value === 'number' && Number.isInteger(entry.value)
+              ? entry.value
+              : typeof entry.value === 'number'
+                ? entry.value.toFixed(1)
+                : String(entry.value)}
+          </strong>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function PresenterChartHeader({
+  eyebrow,
+  title,
+  meta,
+}: {
+  eyebrow?: string
+  title: string
+  meta?: ReactNode
+}) {
+  return (
+    <div style={{ marginBottom: '1rem' }}>
+      {eyebrow ? (
+        <div
+          style={{
+            textTransform: 'uppercase',
+            letterSpacing: '0.12em',
+            fontSize: '0.72rem',
+            fontWeight: 600,
+            color: '#cf6227',
+            lineHeight: 1,
+            marginBottom: '0.35rem',
+          }}
+        >
+          {eyebrow}
+        </div>
+      ) : null}
+      <h2>{title}</h2>
+      {meta ? (
+        <p
+          className="presenter-support-copy"
+          style={{ marginTop: '0.35rem' }}
+        >
+          {meta}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
+function PollBars({ options }: { options: PollOption[] }) {
+  const total = options.reduce((acc, o) => acc + Math.max(0, o.value), 0)
+  const max = options.reduce((acc, o) => Math.max(acc, o.value), 0)
+  return (
+    <div className="poll-bars">
+      {options.map((option) => {
+        const pct = total > 0 ? Math.round((option.value / total) * 100) : 0
+        const fillPct = max > 0 ? Math.max(4, (option.value / max) * 100) : 0
+        return (
+          <div key={option.label} className="poll-bar" title={option.label}>
+            <div style={{ minWidth: 0 }}>
+              <div className="poll-bar__label" title={option.label}>
+                {option.label}
+              </div>
+              <div className="poll-bar__track">
+                <div className="poll-bar__fill" style={{ width: `${fillPct}%` }} />
+              </div>
+            </div>
+            <div className="poll-bar__value">
+              <span className="poll-bar__count">{option.value}</span>
+              <span className="poll-bar__pct">{pct}%</span>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
 
 function getPresenterMomentum(totalResponses: number, reactionCount: number) {
   const score = totalResponses + reactionCount * 2
@@ -103,11 +233,26 @@ export function PresenterPage() {
     }
 
     return [
-      { label: 'Positive', value: liveSnapshot.analytics.sentiment.positive },
-      { label: 'Neutral', value: liveSnapshot.analytics.sentiment.neutral },
-      { label: 'Negative', value: liveSnapshot.analytics.sentiment.negative },
+      { name: 'Positive', label: 'Positive', value: liveSnapshot.analytics.sentiment.positive },
+      { name: 'Neutral', label: 'Neutral', value: liveSnapshot.analytics.sentiment.neutral },
+      { name: 'Negative', label: 'Negative', value: liveSnapshot.analytics.sentiment.negative },
     ]
   }, [liveSnapshot])
+
+  const paletteHook = useMemo(
+    () => ({
+      positive: presenterCssVar('--chart-positive', '#5ed4ad'),
+      neutral: presenterCssVar('--chart-neutral', '#c9bfa8'),
+      negative: presenterCssVar('--chart-negative', '#e28a8a'),
+      primary: presenterCssVar('--chart-primary', '#cf6227'),
+      secondary: presenterCssVar('--chart-secondary', '#b1ad3b'),
+      tertiary: presenterCssVar('--chart-tertiary', '#5ed4ad'),
+      grid: presenterCssVar('--chart-grid', 'rgba(207,165,121,0.16)'),
+      axis: presenterCssVar('--chart-axis', 'rgba(207,165,121,0.32)'),
+      tick: presenterCssVar('--chart-tick', '#c8bca6'),
+    }),
+    [liveSnapshot?.event.id],
+  )
 
   const totalEngagement = useMemo(
     () => (liveSnapshot?.metrics.totalResponses ?? 0) + (liveSnapshot?.metrics.reactionCount ?? 0),
@@ -288,14 +433,56 @@ export function PresenterPage() {
 
         {view === 'sentiment' ? (
           <div className="presenter-chart">
-            <h2>Audience sentiment</h2>
+            <PresenterChartHeader eyebrow="Sentiment" title="Audience sentiment" meta="Automated text analysis scaled as directional audience signal." />
             <ResponsiveContainer width="100%" height={420}>
-              <BarChart data={sentimentData}>
-                <CartesianGrid stroke="#263449" strokeDasharray="3 3" />
-                <XAxis dataKey="label" stroke="#e2e8f0" />
-                <YAxis stroke="#e2e8f0" />
-                <Tooltip />
-                <Bar dataKey="value" fill="#34d399" radius={[14, 14, 0, 0]} />
+              <BarChart data={sentimentData} margin={{ top: 8, right: 24, left: 0, bottom: 4 }}>
+                <CartesianGrid stroke={paletteHook.grid} vertical={false} />
+                <XAxis
+                  dataKey="label"
+                  stroke={paletteHook.tick}
+                  tickLine={false}
+                  axisLine={{ stroke: paletteHook.axis }}
+                  fontSize={13}
+                  tick={{ fill: paletteHook.tick, fontWeight: 500 }}
+                />
+                <YAxis
+                  stroke={paletteHook.tick}
+                  tickLine={false}
+                  axisLine={false}
+                  allowDecimals={false}
+                  fontSize={13}
+                  tick={{ fill: paletteHook.tick }}
+                  width={42}
+                />
+                <Tooltip
+                  cursor={{ stroke: paletteHook.axis, strokeDasharray: '4 4' }}
+                  content={(props) => (
+                    <ChartTooltip
+                      active={props.active}
+                      payload={props.payload as unknown as AnyTooltipEntry[]}
+                      label={props.label}
+                    />
+                  )}
+                />
+                <Bar
+                  dataKey="value"
+                  name="Score"
+                  radius={[14, 14, 0, 0]}
+                  barSize={72}
+                >
+                  {sentimentData.map((entry) => (
+                    <Cell
+                      key={entry.name}
+                      fill={
+                        entry.name === 'Positive'
+                          ? paletteHook.positive
+                          : entry.name === 'Neutral'
+                            ? paletteHook.neutral
+                            : paletteHook.negative
+                      }
+                    />
+                  ))}
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -303,20 +490,17 @@ export function PresenterPage() {
 
         {view === 'polls' ? (
           <div className="presenter-chart">
-            <h2>{liveSnapshot.activePoll ? 'Live poll results' : 'Facilitator poll queue'}</h2>
+            <PresenterChartHeader
+              eyebrow="Polls"
+              title={liveSnapshot.activePoll ? 'Live poll results' : 'Facilitator poll queue'}
+              meta={
+                liveSnapshot.activePoll
+                  ? liveSnapshot.activePoll.prompt
+                  : 'Select Launch poll in the dashboard to project results live here.'
+              }
+            />
             {liveSnapshot.activePoll ? (
-              <>
-                <p className="presenter-support-copy">{liveSnapshot.activePoll.prompt}</p>
-              <ResponsiveContainer width="100%" height={420}>
-                  <BarChart data={liveSnapshot.activePoll.options}>
-                  <CartesianGrid stroke="#263449" strokeDasharray="3 3" />
-                  <XAxis dataKey="label" stroke="#e2e8f0" interval={0} angle={-6} height={60} textAnchor="end" />
-                  <YAxis stroke="#e2e8f0" allowDecimals={false} />
-                  <Tooltip />
-                  <Bar dataKey="value" fill="#38bdf8" radius={[14, 14, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-              </>
+              <PollBars options={liveSnapshot.activePoll.options} />
             ) : liveSnapshot.pollResults[0] ? (
               <div className="presenter-insights">
                 {liveSnapshot.pollResults.slice(0, 6).map((poll) => (
@@ -356,18 +540,66 @@ export function PresenterPage() {
 
         {view === 'engagement' ? (
           <div className="presenter-chart">
-            <h2>Participation volume</h2>
-            <p className="presenter-support-copy">
-              Total room activity: <strong>{totalEngagement}</strong> • next milestone:{' '}
-              <strong>{nextMilestone ?? 'complete'}</strong>
-            </p>
+            <PresenterChartHeader
+              eyebrow="Timeline"
+              title="Participation volume"
+              meta={
+                <>
+                  Total room activity: <strong>{totalEngagement}</strong> • next milestone:{' '}
+                  <strong>{nextMilestone ?? 'complete'}</strong>
+                </>
+              }
+            />
             <ResponsiveContainer width="100%" height={420}>
-              <LineChart data={liveSnapshot.metrics.timeline}>
-                <CartesianGrid stroke="#263449" strokeDasharray="3 3" />
-                <XAxis dataKey="time" stroke="#e2e8f0" />
-                <YAxis stroke="#e2e8f0" />
-                <Tooltip />
-                <Line type="monotone" dataKey="value" stroke="#fbbf24" strokeWidth={4} />
+              <LineChart
+                data={liveSnapshot.metrics.timeline}
+                margin={{ top: 8, right: 24, left: 0, bottom: 4 }}
+              >
+                <defs>
+                  <linearGradient id="presenter-engagement-cursor" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={paletteHook.primary} stopOpacity={0.32} />
+                    <stop offset="100%" stopColor={paletteHook.primary} stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid stroke={paletteHook.grid} vertical={false} />
+                <XAxis
+                  dataKey="time"
+                  stroke={paletteHook.tick}
+                  tickLine={false}
+                  axisLine={{ stroke: paletteHook.axis }}
+                  fontSize={13}
+                  tick={{ fill: paletteHook.tick }}
+                  interval={liveSnapshot.metrics.timeline.length > 10 ? 'preserveStartEnd' : 0}
+                />
+                <YAxis
+                  stroke={paletteHook.tick}
+                  tickLine={false}
+                  axisLine={false}
+                  allowDecimals={false}
+                  fontSize={13}
+                  tick={{ fill: paletteHook.tick }}
+                  width={42}
+                />
+                <Tooltip
+                  cursor={{ stroke: paletteHook.primary, strokeDasharray: '4 4' }}
+                  content={(props) => (
+                    <ChartTooltip
+                      active={props.active}
+                      payload={props.payload as unknown as AnyTooltipEntry[]}
+                      label={props.label}
+                      labelPrefix="Window"
+                    />
+                  )}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="value"
+                  name="Actions"
+                  stroke={paletteHook.primary}
+                  strokeWidth={4}
+                  dot={false}
+                  activeDot={{ r: 5, stroke: paletteHook.primary, strokeWidth: 2, fill: '#fff7f1' }}
+                />
               </LineChart>
             </ResponsiveContainer>
           </div>

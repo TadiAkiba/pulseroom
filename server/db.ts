@@ -111,8 +111,31 @@ function parseJson<T>(value: unknown, fallback: T): T {
   }
 }
 
+const KNOWN_TABLES = Object.freeze([
+  'organizers',
+  'organizer_sessions',
+  'events',
+  'interactions',
+  'responses',
+  'analyses',
+  'response_votes',
+  'convex_sync_state',
+])
+const SAFE_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/
+
 function hasColumn(tableName: string, columnName: string) {
-  const columns = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>
+  if (!KNOWN_TABLES.includes(tableName)) {
+    throw new Error(`Unknown table name in hasColumn: ${tableName}`)
+  }
+  if (!SAFE_IDENTIFIER.test(tableName)) {
+    throw new Error(`Disallowed table identifier: ${tableName}`)
+  }
+  if (!SAFE_IDENTIFIER.test(columnName)) {
+    throw new Error(`Disallowed column identifier: ${columnName}`)
+  }
+  const columns = db
+    .prepare(`PRAGMA table_info("${tableName}")`)
+    .all() as Array<{ name: string }>
   return columns.some((column) => column.name === columnName)
 }
 

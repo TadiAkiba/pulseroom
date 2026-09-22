@@ -9,6 +9,7 @@
     "dev:server": "tsx watch server/index.ts",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
+    "test": "node --import tsx/esm --test server/*.test.ts",
     "preview": "vite preview",
     "start": "NODE_ENV=production tsx server/index.ts"
   },

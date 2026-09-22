@@ -9,6 +9,7 @@ import { Server } from 'socket.io'
 import { z } from 'zod'
 import { analyseText, buildAnalytics } from './analysis.ts'
 import { config } from './config.ts'
+import { RateLimiter } from './rateLimiter.ts'
 import {
   countOrganizers,
   createEvent,
@@ -54,11 +55,50 @@ type OrganizerRequest = express.Request & {
 }
 
 const rateLimitWindowMs = 2000
-const lastSubmissionByKey = new Map<string, number>()
+const responseRateLimiter = new RateLimiter({
+  windowMs: rateLimitWindowMs,
+  stalePruneMs: Math.max(5_000, rateLimitWindowMs * 10),
+  pruneEveryWrites: 50,
+  maxEntries: 25_000,
+}).startIntervalPrune(60_000)
 let convexSyncWarned = false
 const convexRetryTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const CONVEX_MIN_RETRY_MS = 1_000
 const CONVEX_MAX_RETRY_MS = 5 * 60 * 1000
+
+function buildCorsOriginPolicy(): (
+  origin: string | undefined,
+  cb: (err: Error | null, allow?: boolean | string) => void,
+) => void {
+  const effectiveOrigins = new Set<string>(config.allowedOrigins)
+  const isLocalhost = (origin: string) => {
+    try {
+      const u = new URL(origin)
+      return (
+        u.hostname === 'localhost' || u.hostname === '127.0.0.1' || u.hostname === '::1')
+        && u.protocol.match(/^https?:$/) !== null
+    } catch {
+      return false
+    }
+  }
+  return (origin, callback) => {
+    if (!origin) {
+      callback(null, true)
+      return
+    }
+    if (effectiveOrigins.size === 0) {
+      if (config.nodeEnv === 'development' && isLocalhost(origin)) {
+        callback(null, true)
+        return
+      }
+      callback(null, false)
+      return
+    }
+    callback(null, effectiveOrigins.has(origin))
+  }
+}
+
+const corsOrigin = buildCorsOriginPolicy()
 
 function convexBackoffMs(tries: number) {
   const jitter = Math.random() * 0.3 + 0.85
@@ -90,14 +130,14 @@ const cookieSecure = config.isProduction || config.usesCrossSiteCookies
 console.log(
   `HTTP: env=${config.nodeEnv} port=${config.port} app=${config.appUrl} frontend=${config.frontendUrl || '(same-origin)'} ` +
   `crossSiteCookies=${config.usesCrossSiteCookies} cookie.sameSite=${cookieSameSite} cookie.secure=${cookieSecure} ` +
-  `allowedOrigins=[${config.allowedOrigins.join(', ') || '*'}]`,
+  `allowedOrigins=[${config.allowedOrigins.join(', ') || (config.nodeEnv === 'development' ? 'dev-localhost-only' : 'deny-all')}]`,
 )
 
 const app = express()
 const server = http.createServer(app)
 const io = new Server(server, {
   cors: {
-    origin: config.allowedOrigins.length > 0 ? config.allowedOrigins : true,
+    origin: corsOrigin,
     credentials: true,
   },
 })
@@ -110,7 +150,7 @@ app.use(express.json({ limit: '1mb' }))
 app.use(cookieParser())
 app.use(
   cors({
-    origin: config.allowedOrigins.length > 0 ? config.allowedOrigins : true,
+    origin: corsOrigin,
     credentials: true,
   }),
 )
@@ -878,17 +918,25 @@ async function broadcastEvent(eventId: string) {
 
 function queueAnalysis(eventId: string, responseId: string, text: string) {
   setTimeout(async () => {
-    const result = analyseText(text)
-    createOrReplaceAnalysis({
-      responseId,
-      eventId,
-      sentiment: result.sentiment,
-      keywords: result.keywords,
-      themes: result.themes,
-      summary: result.summary,
-    })
-    await broadcastEvent(eventId)
-  }, 0)
+    try {
+      const result = analyseText(text)
+      createOrReplaceAnalysis({
+        responseId,
+        eventId,
+        sentiment: result.sentiment,
+        keywords: result.keywords,
+        themes: result.themes,
+        summary: result.summary,
+      })
+      await broadcastEvent(eventId)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      console.error(
+        `[analysis] Failed to queue analysis for event=${eventId} response=${responseId}: ${message}`,
+        err instanceof Error ? err.stack : undefined,
+      )
+    }
+  }, 0).unref?.()
 }
 
 function seedMissingAnalyses() {
@@ -1284,12 +1332,11 @@ app.post('/api/events/code/:code/responses', (req, res) => {
   }
 
   const rateKey = `${req.ip}:${attendee.attendeeKey}:${event.id}:${interaction.id}`
-  const lastSubmission = lastSubmissionByKey.get(rateKey) ?? 0
-  if (Date.now() - lastSubmission < rateLimitWindowMs) {
+  const rateCheck = responseRateLimiter.checkAndRecord(rateKey)
+  if (!rateCheck.allowed) {
     res.status(429).json({ error: 'Please wait a moment before submitting again.' })
     return
   }
-  lastSubmissionByKey.set(rateKey, Date.now())
 
   let content: Record<string, unknown>
   let moderationState: 'pending' | 'visible'

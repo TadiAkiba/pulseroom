@@ -21,7 +21,7 @@ import { ProfileSetupCard } from '../components/attendee/ProfileSetupCard.tsx'
 import { connectPublicSocket } from '../lib/socketHelpers.ts'
 import { api } from '../lib/api.ts'
 import { convexQueries, getConvexClient, setConvexRuntimeConfig } from '../lib/convex.ts'
-import type { AnonymousAttendeeProfile, EventPageData, EventSnapshot, InteractionRecord } from '../types.ts'
+import type { AnonymousAttendeeProfile, EventPageData, EventSnapshot, InteractionRecord, InteractionType } from '../types.ts'
 
 type SubmissionState = Record<string, string>
 type SubmittedState = Record<string, boolean>
@@ -120,6 +120,17 @@ function getEventTeams(snapshot: EventSnapshot | null) {
 
 function getInteractionFormKey(interaction: InteractionRecord) {
   return typeof interaction.settings.formKey === 'string' ? interaction.settings.formKey : interaction.type
+}
+
+const QUICK_ACTION_FORM_KEYS: Record<string, string[]> = {
+  idea: ['idea', 'feedback'],
+  opportunity: ['opportunity', 'poll'],
+  concern: ['concern', 'rating'],
+}
+const QUICK_ACTION_TYPE_FALLBACK: Record<string, InteractionType> = {
+  idea: 'feedback',
+  opportunity: 'poll',
+  concern: 'rating',
 }
 
 function getInteractionFormTitle(interaction: InteractionRecord) {
@@ -552,15 +563,30 @@ export function AttendeePage() {
             <>
           <section className="townhall-actions">
             {quickActions.map((action) => {
-              const matchingInteractions = townhallInteractions
+              const acceptedFormKeys = QUICK_ACTION_FORM_KEYS[action.key] ?? [action.key]
+              const fallbackType = QUICK_ACTION_TYPE_FALLBACK[action.key]
+              const candidates = townhallInteractions
                 .map((interaction, index) => ({ interaction, index }))
-                .filter(({ interaction }) => getInteractionFormKey(interaction) === action.key)
-              const nextUnanswered = matchingInteractions.find(({ interaction }) => !submittedByInteraction[interaction.id])
-              const interactionIndex = nextUnanswered?.index ?? matchingInteractions[0]?.index ?? -1
+                .filter(({ interaction }) => {
+                  const formKey = getInteractionFormKey(interaction)
+                  if (acceptedFormKeys.includes(formKey)) return true
+                  if (fallbackType && interaction.type === fallbackType) return true
+                  return false
+                })
+              const nextUnanswered = candidates.find(
+                ({ interaction }) => !submittedByInteraction[interaction.id],
+              )
+              const candidate = nextUnanswered ?? candidates[0]
+              const interactionIndex = candidate?.index ?? -1
               return (
                 <Card key={action.key} className="townhall-card">
                   <span className="eyebrow">{action.label}</span>
                   <h3>{action.copy}</h3>
+                  {interactionIndex < 0 ? (
+                    <p className="muted" style={{ fontSize: '0.9rem', marginTop: '-0.1rem', marginBottom: '0.6rem' }}>
+                      Organizer hasn’t added this prompt yet. Once created in the dashboard Compose tab, it’ll open here.
+                    </p>
+                  ) : null}
                   <Button
                     type="button"
                     variant="outline"

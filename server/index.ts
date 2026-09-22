@@ -19,6 +19,7 @@ import {
   createOrReplaceAnalysis,
   createResponse,
   deleteOrganizerSession,
+  ensureBaselineInteractions,
   ensureDemoEvent,
   getEventByCode,
   getEventById,
@@ -392,14 +393,6 @@ function requireOrganizer(
 
   ;(req as OrganizerRequest).organizer = lookup.organizer
   next()
-}
-
-function createDefaultInteractions(eventId: string) {
-  const existing = listInteractions(eventId)
-  if (existing.length > 0) {
-    return existing
-  }
-  return []
 }
 
 function formatTime(iso: string) {
@@ -1119,7 +1112,7 @@ app.post('/api/admin/events', requireOrganizer, (req, res) => {
     organizerId: organizer.id,
     ...parsed.data,
   })
-  createDefaultInteractions(event.id)
+  ensureBaselineInteractions(event.id)
   res.status(201).json({ event })
 })
 
@@ -1284,6 +1277,7 @@ app.get('/api/events/code/:code', (req, res) => {
     return
   }
 
+  ensureBaselineInteractions(event.id)
   const interactions = listInteractions(event.id).filter((interaction) => interaction.status === 'active')
   const snapshot = buildEventSnapshot(event.id, false)
   res.json({

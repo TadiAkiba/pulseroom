@@ -176,19 +176,44 @@ export function EventDashboardPage() {
       .map((option) => option.trim())
       .filter(Boolean)
 
+    const interactionType = interactionForm.type as InteractionType
+    const formKeyByType: Record<InteractionType, string> = {
+      question: 'qa',
+      feedback: 'idea',
+      rating: 'concern',
+      poll: 'opportunity',
+      reaction: 'reaction',
+    }
+    const formTitleByType: Record<InteractionType, string> = {
+      question: 'Ask the Room',
+      feedback: 'AI Idea',
+      rating: 'AI Concern',
+      poll: 'AI Opportunity',
+      reaction: 'Live reaction',
+    }
+    const baseSettings: Record<string, unknown> = {
+      formKey: formKeyByType[interactionType],
+      formTitle: formTitleByType[interactionType],
+    }
+    if (interactionType === 'rating') {
+      baseSettings.scale = 5
+      baseSettings.labels = ['Poor', 'Fair', 'Good', 'Great', 'Excellent']
+    }
+    if (interactionType === 'poll') {
+      baseSettings.allowMultiple = false
+    }
+    if (interactionType === 'feedback') {
+      baseSettings.feedEligible = true
+    }
+
     setSaving(true)
     try {
       setError('')
       await api.createInteraction(snapshot.event.id, {
-        type: interactionForm.type as 'question' | 'feedback' | 'rating' | 'poll' | 'reaction',
+        type: interactionType,
         prompt: interactionForm.prompt,
-        options: interactionForm.type === 'poll' || interactionForm.type === 'reaction' ? options : [],
-        settings:
-          interactionForm.type === 'rating'
-            ? { scale: 5 }
-            : interactionForm.type === 'poll'
-              ? { allowMultiple: false }
-              : {},
+        options: interactionType === 'poll' || interactionType === 'reaction' ? options : [],
+        settings: baseSettings,
       })
       setInteractionForm({ type: 'question', prompt: '', options: 'Option A, Option B' })
       setNotice('Interaction created.')

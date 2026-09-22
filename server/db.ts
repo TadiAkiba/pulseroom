@@ -5,6 +5,14 @@ import { pbkdf2Sync, randomBytes, randomUUID } from 'node:crypto'
 import { config } from './config.ts'
 
 export type InteractionType = 'question' | 'feedback' | 'rating' | 'poll' | 'reaction'
+
+const DEFAULT_FORM_KEY_BY_TYPE: Record<InteractionType, string> = {
+  question: 'qa',
+  feedback: 'idea',
+  rating: 'concern',
+  poll: 'opportunity',
+  reaction: 'reaction',
+}
 export type ModerationState = 'pending' | 'visible' | 'hidden' | 'answered' | 'deleted'
 
 export type OrganizerRecord = {
@@ -599,13 +607,19 @@ export function createInteraction(input: {
   status?: 'active' | 'inactive'
   ordering?: number
 }) {
+  const rawSettings = input.settings ?? {}
+  const hasExplicitFormKey =
+    typeof rawSettings.formKey === 'string' && rawSettings.formKey.trim().length > 0
+  const settings = hasExplicitFormKey
+    ? rawSettings
+    : { ...rawSettings, formKey: DEFAULT_FORM_KEY_BY_TYPE[input.type] }
   const interaction: InteractionRecord = {
     id: randomUUID(),
     eventId: input.eventId,
     type: input.type,
     prompt: input.prompt.trim(),
     options: (input.options ?? []).map((option) => option.trim()).filter(Boolean),
-    settings: input.settings ?? {},
+    settings,
     status: input.status ?? 'active',
     ordering: input.ordering ?? listInteractions(input.eventId).length + 1,
     createdAt: now(),
@@ -668,6 +682,90 @@ export function updateInteraction(
   })
 
   return updated
+}
+
+export function ensureBaselineInteractions(eventId: string) {
+  const existing = listInteractions(eventId)
+  const existingFormKeys = new Set(
+    existing
+      .map((interaction) =>
+        typeof interaction.settings.formKey === 'string'
+          ? interaction.settings.formKey.trim()
+          : null,
+      )
+      .filter((formKey): formKey is string => Boolean(formKey)),
+  )
+
+  const baseline: Array<{
+    formKey: string
+    type: InteractionType
+    formTitle: string
+    prompt: string
+    options?: string[]
+    extraSettings?: Record<string, unknown>
+  }> = [
+    {
+      formKey: 'qa',
+      type: 'question',
+      formTitle: 'Ask the Room',
+      prompt: 'What question would you like us to answer?',
+      extraSettings: {
+        formDescription:
+          'Ask anonymously and let the room upvote the questions they want answered live.',
+        points: 4,
+      },
+    },
+    {
+      formKey: 'idea',
+      type: 'feedback',
+      formTitle: 'AI Idea',
+      prompt: 'Share your idea and the value it could unlock.',
+      extraSettings: { feedEligible: true, points: 4 },
+    },
+    {
+      formKey: 'opportunity',
+      type: 'poll',
+      formTitle: 'AI Opportunity',
+      prompt: 'Spot where AI could solve a repeated business problem.',
+      options: [
+        'Customer experience',
+        'Employee experience',
+        'Productivity',
+        'Cost efficiency',
+        'Revenue growth',
+      ],
+      extraSettings: { allowMultiple: false, points: 2 },
+    },
+    {
+      formKey: 'concern',
+      type: 'rating',
+      formTitle: 'AI Concern',
+      prompt: 'Capture what feels risky and what would build trust.',
+      extraSettings: {
+        scale: 5,
+        labels: ['Very concerned', 'Concerned', 'Neutral', 'Reassured', 'Very reassured'],
+        points: 2,
+      },
+    },
+  ]
+
+  for (const item of baseline) {
+    if (existingFormKeys.has(item.formKey)) continue
+    const settings: Record<string, unknown> = {
+      formKey: item.formKey,
+      formTitle: item.formTitle,
+      ...(item.extraSettings ?? {}),
+    }
+    createInteraction({
+      eventId,
+      type: item.type,
+      prompt: item.prompt,
+      options: item.options,
+      settings,
+    })
+  }
+
+  return listInteractions(eventId)
 }
 
 export function listResponses(eventId: string) {

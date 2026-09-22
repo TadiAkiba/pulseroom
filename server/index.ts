@@ -63,8 +63,11 @@ const responseRateLimiter = new RateLimiter({
 }).startIntervalPrune(60_000)
 let convexSyncWarned = false
 const convexRetryTimers = new Map<string, ReturnType<typeof setTimeout>>()
-const CONVEX_MIN_RETRY_MS = 1_000
-const CONVEX_MAX_RETRY_MS = 5 * 60 * 1000
+let convexSyncDeadLettered = 0
+const CONVEX_MIN_RETRY_MS = 30_000
+const CONVEX_MAX_RETRY_MS = 30 * 60 * 1000
+const CONVEX_MAX_RETRIES = 10
+const CONVEX_RETRY_TICK_MS = 60_000
 
 function buildCorsOriginPolicy(): (
   origin: string | undefined,
@@ -101,8 +104,9 @@ function buildCorsOriginPolicy(): (
 const corsOrigin = buildCorsOriginPolicy()
 
 function convexBackoffMs(tries: number) {
+  const safeTries = Math.max(0, Number.isFinite(tries) ? tries : 0)
   const jitter = Math.random() * 0.3 + 0.85
-  const base = Math.min(CONVEX_MAX_RETRY_MS, CONVEX_MIN_RETRY_MS * 2 ** Math.max(0, tries - 1))
+  const base = Math.min(CONVEX_MAX_RETRY_MS, CONVEX_MIN_RETRY_MS * 2 ** safeTries)
   return Math.round(base * jitter)
 }
 
@@ -124,6 +128,7 @@ if (config.enableConvexPublicSync) {
 }
 
 scheduleStaleConvexRetries()
+startConvexRetryScheduler()
 
 const cookieSameSite = config.usesCrossSiteCookies ? 'none' : 'lax'
 const cookieSecure = config.isProduction || config.usesCrossSiteCookies
@@ -841,10 +846,20 @@ function scheduleStaleConvexRetries() {
   if (pending.length === 0) return
   const now = Date.now()
   for (const state of pending) {
+    if (convexRetryTimers.has(state.eventId)) continue
+    if (state.tries >= CONVEX_MAX_RETRIES) {
+      convexSyncDeadLettered += 1
+      console.error(
+        `Convex sync DEAD-LETTER on startup for event ${state.eventId} ` +
+        `(tries=${state.tries} >= ${CONVEX_MAX_RETRIES}). lastError=${state.lastError ?? 'n/a'}`,
+      )
+      continue
+    }
     const dueAtMs = new Date(state.nextRetryAt).getTime()
     const waitMs = Math.max(0, dueAtMs - now)
     console.log(
-      `Convex pending retry: event=${state.eventId} tries=${state.tries} lastError=${state.lastError ?? 'n/a'} retryInMs=${waitMs}`,
+      `Convex pending retry: event=${state.eventId} tries=${state.tries}/${CONVEX_MAX_RETRIES} ` +
+      `lastError=${state.lastError ?? 'n/a'} retryInMs=${waitMs}`,
     )
     const timer = setTimeout(() => {
       convexRetryTimers.delete(state.eventId)
@@ -852,6 +867,25 @@ function scheduleStaleConvexRetries() {
     }, waitMs)
     convexRetryTimers.set(state.eventId, timer)
   }
+}
+
+function startConvexRetryScheduler() {
+  const intervalId = setInterval(() => {
+    try {
+      scheduleStaleConvexRetries()
+    } catch (error) {
+      console.warn(
+        `Convex retry scheduler tick failed: ${error instanceof Error ? error.message : 'unknown error'}`,
+      )
+    }
+    if (convexSyncDeadLettered > 0) {
+      console.warn(
+        `Convex sync backlog: ${convexSyncDeadLettered} dead-lettered event(s). ` +
+        `Restart server after fixing Convex to resume mirroring.`,
+      )
+    }
+  }, CONVEX_RETRY_TICK_MS)
+  if (typeof intervalId.unref === 'function') intervalId.unref()
 }
 
 async function syncEventToConvex(publicSnapshot: NonNullable<ReturnType<typeof buildEventSnapshot>>) {
@@ -893,15 +927,47 @@ async function syncEventToConvex(publicSnapshot: NonNullable<ReturnType<typeof b
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown sync failure.'
-    const nextRetryAt = new Date(Date.now() + convexBackoffMs(0)).toISOString()
+    const currentState = listConvexSyncFailures().find((s) => s.eventId === eventId)
+    const tries = (currentState?.tries ?? 0) + 1
+    const nextRetryAt = new Date(Date.now() + convexBackoffMs(tries - 1)).toISOString()
     markConvexSyncFailure(eventId, message, nextRetryAt)
+    if (tries >= CONVEX_MAX_RETRIES) {
+      if (convexRetryTimers.has(eventId)) {
+        const existing = convexRetryTimers.get(eventId)
+        if (existing) clearTimeout(existing)
+        convexRetryTimers.delete(eventId)
+      }
+      convexSyncDeadLettered += 1
+      console.error(
+        `Convex sync DEAD-LETTER after ${tries} retries for event ${eventId}. ` +
+        `Mirror will be stale until next server restart. Latest error: ${message}`,
+      )
+      return
+    }
     if (!convexSyncWarned) {
-      console.warn(`Convex sync failed for event ${eventId}: ${message}. Will retry in background.`)
+      console.warn(`Convex sync failed for event ${eventId}: ${message}. Will retry in background (tries=${tries}/${CONVEX_MAX_RETRIES}).`)
       convexSyncWarned = true
     }
-    const pending = listConvexSyncFailures().find((s) => s.eventId === eventId)
-    scheduleConvexRetry(eventId, pending?.tries ?? 1)
+    scheduleConvexRetry(eventId, tries)
   }
+}
+
+type PendingEventBroadcast = {
+  timerId: ReturnType<typeof setTimeout>
+  admin: NonNullable<ReturnType<typeof buildEventSnapshot>>
+  public: NonNullable<ReturnType<typeof buildEventSnapshot>>
+}
+
+const BROADCAST_COALESCE_MS = 1000
+const pendingEvents = new Map<string, PendingEventBroadcast>()
+
+function flushPendingBroadcast(eventId: string) {
+  const pending = pendingEvents.get(eventId)
+  if (!pending) return
+  pendingEvents.delete(eventId)
+  io.to(`event:${eventId}:admin`).emit('event:update-admin', pending.admin)
+  io.to(`event:${eventId}:public`).emit('event:update-public', pending.public)
+  void syncEventToConvex(pending.public)
 }
 
 async function broadcastEvent(eventId: string) {
@@ -911,9 +977,20 @@ async function broadcastEvent(eventId: string) {
     return
   }
 
+  const existing = pendingEvents.get(eventId)
+  if (existing) {
+    existing.admin = admin
+    existing.public = publicView
+    return
+  }
+
   io.to(`event:${eventId}:admin`).emit('event:update-admin', admin)
   io.to(`event:${eventId}:public`).emit('event:update-public', publicView)
   void syncEventToConvex(publicView)
+
+  const timerId = setTimeout(() => flushPendingBroadcast(eventId), BROADCAST_COALESCE_MS)
+  if (typeof timerId.unref === 'function') timerId.unref()
+  pendingEvents.set(eventId, { timerId, admin, public: publicView })
 }
 
 function queueAnalysis(eventId: string, responseId: string, text: string) {

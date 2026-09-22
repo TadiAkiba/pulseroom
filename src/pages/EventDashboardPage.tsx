@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import type { FormEvent, ReactNode } from 'react'
+import type { FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { io, type Socket } from 'socket.io-client'
 import {
   CartesianGrid,
   Cell,
@@ -22,11 +21,17 @@ import { Card, CardHeader, CardTitle, CardDescription } from '../components/ui/C
 import { Field, Input, Select, Textarea } from '../components/ui/Field.tsx'
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/Tabs.tsx'
 import { api } from '../lib/api.ts'
+import {
+  ChartShell,
+  ChartTooltip,
+  PollBars,
+  type AnyTooltipEntry,
+} from '../lib/charts.tsx'
+import { resolveCssVar } from '../lib/theme.ts'
+import { connectAdminSocket } from '../lib/socketHelpers.ts'
+import { PulseGaugeCard } from '../components/dashboard/PulseGaugeCard.tsx'
 import { parseInteractionFile } from '../lib/interactionImport.ts'
-import { socketUrl } from '../lib/realtime.ts'
 import type { EventSnapshot, InteractionRecord, InteractionType } from '../types.ts'
-
-type PollOption = { label: string; value: number }
 
 const dashboardTabs = ['overview', 'analytics', 'questions', 'polls', 'compose'] as const
 type DashboardTab = (typeof dashboardTabs)[number]
@@ -39,122 +44,8 @@ const TAB_LABEL: Record<DashboardTab, string> = {
   compose: 'Compose',
 }
 
-type AnyTooltipEntry = {
-  name?: unknown
-  dataKey?: unknown
-  value?: unknown
-  color?: unknown
-}
-
-function cssVar(name: string) {
-  const match = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
-  return match || '#8a8070'
-}
-
 function resolvePaletteCssVar(token: string, fallback: string) {
-  if (typeof window === 'undefined') return fallback
-  return cssVar(token) || fallback
-}
-
-function ChartTooltip({
-  active,
-  payload,
-  label,
-  labelPrefix,
-}: {
-  active?: boolean
-  payload?: readonly AnyTooltipEntry[]
-  label?: unknown
-  labelPrefix?: string
-}) {
-  if (!active || !payload || payload.length === 0) return null
-  const first = payload[0]
-  const seriesColor = typeof first?.color === 'string' ? first.color : 'var(--chart-primary)'
-  return (
-    <div className="chart-tooltip">
-      <div className="chart-tooltip__label">
-        {labelPrefix ? `${labelPrefix} ${String(label ?? '')}` : String(label ?? '')}
-      </div>
-      {payload.map((entry, index) => (
-        <div key={`${String(entry.dataKey)}-${index}`} className="chart-tooltip__item">
-          <span className="chart-tooltip__dot" style={{ background: seriesColor }} />
-          <span style={{ color: 'var(--text-soft)', flex: '0 0 auto' }}>
-            {String(entry.name ?? entry.dataKey)}:
-          </span>
-          <strong
-            style={{
-              marginLeft: 'auto',
-              color: 'var(--text)',
-              fontVariantNumeric: 'tabular-nums',
-              fontWeight: 600,
-            }}
-          >
-            {typeof entry.value === 'number' && Number.isInteger(entry.value)
-              ? entry.value
-              : typeof entry.value === 'number'
-                ? entry.value.toFixed(1)
-                : String(entry.value)}
-          </strong>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function ChartShell({
-  eyebrow,
-  title,
-  meta,
-  children,
-  className = '',
-}: {
-  eyebrow?: string
-  title: string
-  meta?: ReactNode
-  children: ReactNode
-  className?: string
-}) {
-  return (
-    <div className={`chart-shell ${className}`}>
-      <div className="chart-shell__header">
-        <div style={{ minWidth: 0 }}>
-          {eyebrow ? <div className="chart-shell__eyebrow">{eyebrow}</div> : null}
-          <div className="chart-shell__title">{title}</div>
-          {meta ? <div className="chart-shell__meta">{meta}</div> : null}
-        </div>
-      </div>
-      {children}
-    </div>
-  )
-}
-
-function PollBars({ options }: { options: PollOption[] }) {
-  const total = options.reduce((acc, o) => acc + Math.max(0, o.value), 0)
-  const max = options.reduce((acc, o) => Math.max(acc, o.value), 0)
-  return (
-    <div className="poll-bars">
-      {options.map((option) => {
-        const pct = total > 0 ? Math.round((option.value / total) * 100) : 0
-        const fillPct = max > 0 ? Math.max(4, (option.value / max) * 100) : 0
-        return (
-          <div key={option.label} className="poll-bar" title={option.label}>
-            <div style={{ minWidth: 0 }}>
-              <div className="poll-bar__label" title={option.label}>
-                {option.label}
-              </div>
-              <div className="poll-bar__track">
-                <div className="poll-bar__fill" style={{ width: `${fillPct}%` }} />
-              </div>
-            </div>
-            <div className="poll-bar__value">
-              <span className="poll-bar__count">{option.value}</span>
-              <span className="poll-bar__pct">{pct}%</span>
-            </div>
-          </div>
-        )
-      })}
-    </div>
-  )
+  return resolveCssVar(token, fallback)
 }
 
 export function EventDashboardPage() {
@@ -173,21 +64,17 @@ export function EventDashboardPage() {
   })
 
   useEffect(() => {
-    let socket: Socket | undefined
+    let cleanup: (() => void) | undefined
 
     api
       .getAdminEvent(eventId)
       .then((response) => {
         setSnapshot(response)
         setLoading(false)
-        socket = io(socketUrl, {
-          transports: ['websocket'],
-          withCredentials: true,
-        })
-        socket.emit('event:join-admin', response.event.id)
-        socket.on('event:update-admin', (nextSnapshot: EventSnapshot) => {
-          setSnapshot(nextSnapshot)
-        })
+        const lifecycle = connectAdminSocket(response.event.id, (nextSnapshot: EventSnapshot) =>
+          setSnapshot(nextSnapshot),
+        )
+        cleanup = lifecycle.cleanup
       })
       .catch((pageError) => {
         setLoadError(pageError instanceof Error ? pageError.message : 'Unable to load event dashboard.')
@@ -195,7 +82,7 @@ export function EventDashboardPage() {
       })
 
     return () => {
-      socket?.disconnect()
+      cleanup?.()
     }
   }, [eventId])
 
@@ -357,7 +244,7 @@ export function EventDashboardPage() {
       axis: resolvePaletteCssVar('--chart-axis', '#a29883'),
       tick: resolvePaletteCssVar('--chart-tick', '#7d7466'),
     }),
-    [snapshot?.event.id],
+    [],
   )
 
   if (loading) {
@@ -443,70 +330,13 @@ export function EventDashboardPage() {
                 </CardDescription>
               </CardHeader>
               <div style={{ padding: '1.25rem 1.5rem 1.5rem' }}>
-                {snapshot.ratingResults.map((rating) => {
-                  const ratio = Math.max(0, Math.min(1, Number.isFinite(rating.average) ? rating.average / rating.scale : 0))
-                  const circumference = 2 * Math.PI * 46
-                  const strokeDashoffset = circumference * (1 - ratio)
-                  const chartPositive = resolvePaletteCssVar('--chart-positive', '#5ed4ad')
-                  const chartNeutral = resolvePaletteCssVar('--chart-neutral', '#c9bfa8')
-                  const chartNegative = resolvePaletteCssVar('--chart-negative', '#e28a8a')
-                  const chartPrimary = resolvePaletteCssVar('--chart-primary', '#cf6227')
-                  const sentimentLabel =
-                    rating.average >= 4.2
-                      ? 'Strongly positive'
-                      : rating.average >= 3.5
-                        ? 'Positive'
-                        : rating.average >= 2.5
-                          ? 'Neutral'
-                          : rating.average >= 1.5
-                            ? 'Cooler room'
-                            : 'Concern flagged'
-                  const pulseColor =
-                    rating.average >= 4.2
-                      ? chartPositive
-                      : rating.average >= 3.5
-                        ? chartPrimary
-                        : rating.average >= 2.5
-                          ? chartNeutral
-                          : chartNegative
-                  return (
-                    <article key={rating.id} className="pulse-card">
-                      <div className="pulse-card__gauge" aria-hidden>
-                        <svg viewBox="0 0 120 120">
-                          <circle className="gauge-track" cx="60" cy="60" r="46" />
-                          <circle
-                            className="gauge-fill"
-                            cx="60"
-                            cy="60"
-                            r="46"
-                            stroke={pulseColor}
-                            strokeDasharray={circumference}
-                            strokeDashoffset={strokeDashoffset}
-                          />
-                        </svg>
-                        <div className="pulse-card__gauge-center">
-                          <div>
-                            <div className="pulse-card__avg">{rating.responses ? rating.average : '—'}</div>
-                            <div className="pulse-card__scale">/ {rating.scale}</div>
-                          </div>
-                        </div>
-                      </div>
-                      <div>
-                        <h3 className="pulse-card__headline">{rating.prompt}</h3>
-                        <p className="pulse-card__sub">
-                          {rating.responses
-                            ? `This pulse reading aggregates ${rating.responses} anonymous attendee ratings in real time.`
-                            : 'No one has voted on this pulse yet — ratings will populate here as the room responds.'}
-                        </p>
-                        <div className="pulse-card__summary">
-                          <span className="pulse-card__badge">{sentimentLabel}</span>
-                          <span className="pulse-card__badge">{rating.responses.toLocaleString()} responses</span>
-                          <span className="pulse-card__badge">1–{rating.scale} scale</span>
-                        </div>
-                      </div>
-                    </article>
-                  )
-                })}
+                {snapshot.ratingResults.map((rating) => (
+                  <PulseGaugeCard
+                    key={rating.id}
+                    rating={rating}
+                    palette={paletteHook}
+                  />
+                ))}
               </div>
             </Card>
           ) : null}

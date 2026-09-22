@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useParams } from 'react-router-dom'
 import { ConvexProvider, useQuery } from 'convex/react'
-import { io, type Socket } from 'socket.io-client'
 import { Alert } from '../components/ui/Alert.tsx'
 import { Badge } from '../components/ui/Badge.tsx'
 import { Button } from '../components/ui/Button.tsx'
@@ -15,12 +14,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '../components/ui/Dialog.tsx'
-import { Field, Input, Select, Textarea } from '../components/ui/Field.tsx'
+import { Textarea } from '../components/ui/Field.tsx'
 import { Progress } from '../components/ui/Progress.tsx'
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/Tabs.tsx'
+import { ProfileSetupCard } from '../components/attendee/ProfileSetupCard.tsx'
+import { connectPublicSocket } from '../lib/socketHelpers.ts'
 import { api } from '../lib/api.ts'
 import { convexQueries, getConvexClient, setConvexRuntimeConfig } from '../lib/convex.ts'
-import { socketUrl } from '../lib/realtime.ts'
 import type { AnonymousAttendeeProfile, EventPageData, EventSnapshot, InteractionRecord } from '../types.ts'
 
 type SubmissionState = Record<string, string>
@@ -190,7 +190,7 @@ export function AttendeePage() {
   )
 
   useEffect(() => {
-    let socket: Socket | undefined
+    let cleanup: (() => void) | undefined
 
     api
       .getEventByCode(code)
@@ -210,14 +210,10 @@ export function AttendeePage() {
           team: nextTeams.includes(current.team) ? current.team : nextTeams[0] ?? 'Catalysts',
         }))
 
-        socket = io(socketUrl, {
-          transports: ['websocket'],
-          withCredentials: true,
-        })
-        socket.emit('event:join-public', response.event.id)
-        socket.on('event:update-public', (nextSnapshot: EventSnapshot) => {
-          setSnapshot(nextSnapshot)
-        })
+        const lifecycle = connectPublicSocket(response.event.id, (nextSnapshot: EventSnapshot) =>
+          setSnapshot(nextSnapshot),
+        )
+        cleanup = lifecycle.cleanup
       })
       .catch((pageError) => {
         setLoadError(pageError instanceof Error ? pageError.message : 'Unable to load event.')
@@ -225,7 +221,7 @@ export function AttendeePage() {
       })
 
     return () => {
-      socket?.disconnect()
+      cleanup?.()
     }
   }, [code])
 
@@ -469,40 +465,12 @@ export function AttendeePage() {
       </section>
 
       {!profile ? (
-        <Card className="townhall-setup">
-          <div className="stack-list">
-            <div>
-              <span className="eyebrow">Step 1</span>
-              <h2>Choose your anonymous nickname and team</h2>
-              <p className="muted">Nicknames and teams are visible in the townhall feed, but they are not linked to your real identity.</p>
-            </div>
-          </div>
-          <div className="townhall-setup__grid">
-            <Field label="Anonymous nickname">
-              <Input
-                value={draftProfile.nickname}
-                onChange={(event) => setDraftProfile((current) => ({ ...current, nickname: event.target.value }))}
-                maxLength={24}
-                placeholder="BrightSpark42"
-              />
-            </Field>
-            <Field label="Team">
-              <Select
-                value={draftProfile.team}
-                onChange={(event) => setDraftProfile((current) => ({ ...current, team: event.target.value }))}
-              >
-                {teams.map((team) => (
-                  <option key={team} value={team}>
-                    {team}
-                  </option>
-                ))}
-              </Select>
-            </Field>
-          </div>
-          <Button type="button" onClick={saveProfile}>
-            Join the AI Townhall
-          </Button>
-        </Card>
+        <ProfileSetupCard
+          draft={draftProfile}
+          teams={teams}
+          onChange={setDraftProfile}
+          onSave={saveProfile}
+        />
       ) : null}
 
       <Card className="attendee-panel">

@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useQuery } from 'convex/react'
 import { useParams } from 'react-router-dom'
-import { io, type Socket } from 'socket.io-client'
 import {
   Bar,
   BarChart,
@@ -18,72 +17,22 @@ import {
 import { Badge } from '../components/ui/Badge.tsx'
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/Tabs.tsx'
 import { api } from '../lib/api.ts'
+import {
+  ChartTooltip,
+  PollBars,
+  type AnyTooltipEntry,
+} from '../lib/charts.tsx'
+import { resolveCssVar } from '../lib/theme.ts'
+import { connectPublicSocket } from '../lib/socketHelpers.ts'
 import { convexQueries, isConvexEnabled, setConvexRuntimeConfig } from '../lib/convex.ts'
-import { socketUrl } from '../lib/realtime.ts'
 import type { EventSnapshot } from '../types.ts'
 
 const views = ['questions', 'ideas', 'leaderboard', 'word-cloud', 'sentiment', 'polls', 'ratings', 'engagement', 'insights'] as const
 type PresenterView = (typeof views)[number]
 const presenterMilestones = [10, 25, 50, 100, 200]
 
-type PollOption = { label: string; value: number }
-
-type AnyTooltipEntry = {
-  name?: unknown
-  dataKey?: unknown
-  value?: unknown
-  color?: unknown
-}
-
 function presenterCssVar(name: string, fallback: string) {
-  if (typeof window === 'undefined') return fallback
-  const match = getComputedStyle(document.documentElement).getPropertyValue(name).trim()
-  return match || fallback
-}
-
-function ChartTooltip({
-  active,
-  payload,
-  label,
-  labelPrefix,
-}: {
-  active?: boolean
-  payload?: readonly AnyTooltipEntry[]
-  label?: unknown
-  labelPrefix?: string
-}) {
-  if (!active || !payload || payload.length === 0) return null
-  const first = payload[0]
-  const seriesColor = typeof first?.color === 'string' ? first.color : 'var(--chart-primary)'
-  return (
-    <div className="chart-tooltip">
-      <div className="chart-tooltip__label">
-        {labelPrefix ? `${labelPrefix} ${String(label ?? '')}` : String(label ?? '')}
-      </div>
-      {payload.map((entry, index) => (
-        <div key={`${String(entry.dataKey)}-${index}`} className="chart-tooltip__item">
-          <span className="chart-tooltip__dot" style={{ background: seriesColor }} />
-          <span style={{ color: 'var(--text-soft)', flex: '0 0 auto' }}>
-            {String(entry.name ?? entry.dataKey)}:
-          </span>
-          <strong
-            style={{
-              marginLeft: 'auto',
-              color: 'var(--text)',
-              fontVariantNumeric: 'tabular-nums',
-              fontWeight: 600,
-            }}
-          >
-            {typeof entry.value === 'number' && Number.isInteger(entry.value)
-              ? entry.value
-              : typeof entry.value === 'number'
-                ? entry.value.toFixed(1)
-                : String(entry.value)}
-          </strong>
-        </div>
-      ))}
-    </div>
-  )
+  return resolveCssVar(name, fallback)
 }
 
 function PresenterChartHeader({
@@ -121,35 +70,6 @@ function PresenterChartHeader({
           {meta}
         </p>
       ) : null}
-    </div>
-  )
-}
-
-function PollBars({ options }: { options: PollOption[] }) {
-  const total = options.reduce((acc, o) => acc + Math.max(0, o.value), 0)
-  const max = options.reduce((acc, o) => Math.max(acc, o.value), 0)
-  return (
-    <div className="poll-bars">
-      {options.map((option) => {
-        const pct = total > 0 ? Math.round((option.value / total) * 100) : 0
-        const fillPct = max > 0 ? Math.max(4, (option.value / max) * 100) : 0
-        return (
-          <div key={option.label} className="poll-bar" title={option.label}>
-            <div style={{ minWidth: 0 }}>
-              <div className="poll-bar__label" title={option.label}>
-                {option.label}
-              </div>
-              <div className="poll-bar__track">
-                <div className="poll-bar__fill" style={{ width: `${fillPct}%` }} />
-              </div>
-            </div>
-            <div className="poll-bar__value">
-              <span className="poll-bar__count">{option.value}</span>
-              <span className="poll-bar__pct">{pct}%</span>
-            </div>
-          </div>
-        )
-      })}
     </div>
   )
 }
@@ -194,7 +114,7 @@ export function PresenterPage() {
     : snapshot
 
   useEffect(() => {
-    let socket: Socket | undefined
+    let cleanup: (() => void) | undefined
 
     api
       .getPresenterEvent(code)
@@ -205,14 +125,10 @@ export function PresenterPage() {
         }
         setSnapshot(response.snapshot)
         setLoading(false)
-        socket = io(socketUrl, {
-          transports: ['websocket'],
-          withCredentials: true,
-        })
-        socket.emit('event:join-public', response.snapshot.event.id)
-        socket.on('event:update-public', (nextSnapshot: EventSnapshot) => {
-          setSnapshot(nextSnapshot)
-        })
+        const lifecycle = connectPublicSocket(response.snapshot.event.id, (nextSnapshot: EventSnapshot) =>
+          setSnapshot(nextSnapshot),
+        )
+        cleanup = lifecycle.cleanup
       })
       .catch((pageError) => {
         setError(pageError instanceof Error ? pageError.message : 'Unable to load presenter mode.')
@@ -220,7 +136,7 @@ export function PresenterPage() {
       })
 
     return () => {
-      socket?.disconnect()
+      cleanup?.()
     }
   }, [code])
 
@@ -248,7 +164,7 @@ export function PresenterPage() {
       axis: presenterCssVar('--chart-axis', 'rgba(207,165,121,0.32)'),
       tick: presenterCssVar('--chart-tick', '#c8bca6'),
     }),
-    [liveSnapshot?.event.id],
+    [],
   )
 
   const totalEngagement = useMemo(

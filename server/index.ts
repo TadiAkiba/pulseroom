@@ -460,7 +460,11 @@ function buildEventSnapshot(eventId: string, includeHidden: boolean) {
     }
 
     if (interaction.type === 'question') {
-      return response.moderationState === 'visible' || response.moderationState === 'answered'
+      return (
+        response.moderationState === 'visible' ||
+        response.moderationState === 'answered' ||
+        response.moderationState === 'pending'
+      )
     }
 
     return response.moderationState !== 'hidden'
@@ -704,7 +708,11 @@ function buildEventSnapshot(eventId: string, includeHidden: boolean) {
     analytics,
     questionStream,
     presenterQuestions: questionStream
-      .filter((question) => question.moderationState === 'visible' || question.moderationState === 'answered')
+      .filter((question) =>
+        question.moderationState === 'visible' ||
+        question.moderationState === 'answered' ||
+        question.moderationState === 'pending',
+      )
       .slice(0, 12),
     ideaFeed: ideaFeed.slice(0, 9),
     teamLeaderboard,
@@ -1273,7 +1281,7 @@ app.post('/api/events/code/:code/responses', (req, res) => {
         return
       }
       content = { text: parsed.data.text.trim(), ...attendee }
-      moderationState = interaction.type === 'question' ? 'pending' : 'visible'
+      moderationState = 'visible'
       break
     }
     case 'rating': {
@@ -1339,10 +1347,7 @@ app.post('/api/events/code/:code/responses', (req, res) => {
   void broadcastEvent(event.id)
   res.status(201).json({
     responseId: response.id,
-    message:
-      interaction.type === 'question'
-        ? 'Question received. It is waiting for organiser approval before appearing publicly.'
-        : `${toTitle(interaction.type)} captured successfully.`,
+    message: `${toTitle(interaction.type)} captured successfully.`,
   })
 })
 

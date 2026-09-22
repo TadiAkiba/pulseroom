@@ -310,23 +310,25 @@ export function PresenterPage() {
         : null}
       <main className="presenter-shell">
         <header className="presenter-header">
-        <div>
-          <div className="achievement-row">
-            <Badge variant="info">{liveSnapshot.event.name}</Badge>
-            <Badge variant={momentum.variant}>{momentum.label}</Badge>
+          <div className="presenter-header__top">
+            <div className="presenter-header__identity">
+              <div className="achievement-row">
+                <Badge variant="info">{liveSnapshot.event.name}</Badge>
+                <Badge variant={momentum.variant}>{momentum.label}</Badge>
+              </div>
+              <h1>{liveSnapshot.event.code}</h1>
+            </div>
           </div>
-          <h1>{liveSnapshot.event.code}</h1>
-        </div>
-        <Tabs className="presenter-tabs">
-          <TabsList>
-            {views.map((item) => (
-              <TabsTrigger key={item} active={view === item} onClick={() => setView(item)}>
-                {item.replace('-', ' ')}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
-      </header>
+          <Tabs className="presenter-tabs">
+            <TabsList>
+              {views.map((item) => (
+                <TabsTrigger key={item} active={view === item} onClick={() => setView(item)}>
+                  {item.replace('-', ' ')}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+        </header>
 
       <section className="presenter-marquee">
         <article className="presenter-card presenter-card--gamified">

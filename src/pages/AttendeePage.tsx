@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useParams } from 'react-router-dom'
 import { ConvexProvider, useQuery } from 'convex/react'
@@ -7,6 +7,14 @@ import { Alert } from '../components/ui/Alert.tsx'
 import { Badge } from '../components/ui/Badge.tsx'
 import { Button } from '../components/ui/Button.tsx'
 import { Card } from '../components/ui/Card.tsx'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '../components/ui/Dialog.tsx'
 import { Field, Input, Select, Textarea } from '../components/ui/Field.tsx'
 import { Progress } from '../components/ui/Progress.tsx'
 import { Tabs, TabsList, TabsTrigger } from '../components/ui/Tabs.tsx'
@@ -337,6 +345,46 @@ export function AttendeePage() {
     }
     return 'All session milestones unlocked.'
   }, [nextMilestone, progress])
+
+  const completedAllTownhall = townhallInteractions.length > 0 && answeredCount === townhallInteractions.length
+  const trophyShownKey = `pulseroom:${code}:completion-trophy-shown`
+  const [trophyOpen, setTrophyOpen] = useState(false)
+  const trophyDismissedRef = useRef(false)
+  useEffect(() => {
+    if (!completedAllTownhall || trophyDismissedRef.current) return
+    const alreadyShown = typeof window !== 'undefined' && window.localStorage.getItem(trophyShownKey) === '1'
+    if (alreadyShown) {
+      trophyDismissedRef.current = true
+      return
+    }
+    const id = window.setTimeout(() => {
+      if (trophyDismissedRef.current) return
+      setTrophyOpen(true)
+    }, 650)
+    return () => window.clearTimeout(id)
+  }, [completedAllTownhall, trophyShownKey])
+
+  function dismissTrophy() {
+    trophyDismissedRef.current = true
+    if (typeof window !== 'undefined') {
+      try {
+        window.localStorage.setItem(trophyShownKey, '1')
+      } catch {
+        // Storage unavailable — ignore
+      }
+    }
+    setTrophyOpen(false)
+  }
+
+  const totalEarnedPoints = useMemo(() => {
+    let earned = 0
+    for (const interaction of townhallInteractions) {
+      if (submittedByInteraction[interaction.id]) {
+        earned += Number(interaction.settings.points ?? 0) || 0
+      }
+    }
+    return earned
+  }, [submittedByInteraction, townhallInteractions])
 
   const quickActions = useMemo(
     () => [
@@ -720,6 +768,47 @@ export function AttendeePage() {
         </>
       ) : null}
     </main>
+
+      <Dialog open={trophyOpen} onClose={dismissTrophy} role="alertdialog" aria-label="Session completed.">
+        <DialogHeader>
+          <div className="trophy-emblem" aria-hidden>🏆</div>
+          <DialogTitle>Sentiment round complete</DialogTitle>
+          <DialogDescription>
+            You've answered every prompt in the session. Your anonymous responses are now part of the live room
+            sentiment feed.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogContent>
+          <div className="completion-stats">
+            <div className="completion-stats__cell">
+              <div className="completion-stats__eyebrow">Prompts</div>
+              <div className="completion-stats__value">
+                {answeredCount}/{townhallInteractions.length}
+              </div>
+            </div>
+            <div className="completion-stats__cell">
+              <div className="completion-stats__eyebrow">Points earned</div>
+              <div className="completion-stats__value">{totalEarnedPoints}</div>
+            </div>
+            <div className="completion-stats__cell">
+              <div className="completion-stats__eyebrow">Current streak</div>
+              <div className="completion-stats__value">×{streak}</div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+            <Badge variant="outline">Level · {level}</Badge>
+            <Badge variant="outline">{answeredCount === townhallInteractions.length ? 'All prompts complete' : 'Continue answering'}</Badge>
+          </div>
+        </DialogContent>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={dismissTrophy}>
+            Back to the room
+          </Button>
+          <Button type="button" onClick={dismissTrophy}>
+            Continue exploring
+          </Button>
+        </DialogFooter>
+      </Dialog>
     </>
   )
 }

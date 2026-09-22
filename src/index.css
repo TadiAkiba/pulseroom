@@ -1181,14 +1181,43 @@ h3 {
 }
 
 .presenter-header {
-  grid-template-columns: minmax(0, 280px) 1fr;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto;
+  row-gap: 1.1rem;
+  align-items: end;
   margin-bottom: 1.5rem;
+}
+
+.presenter-header__top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: end;
+  justify-content: space-between;
+}
+
+.presenter-header__identity {
+  min-width: 0;
 }
 
 .presenter-header h1 {
   font-size: clamp(3rem, 6vw, 6rem);
   font-weight: 300;
   letter-spacing: -0.02em;
+  margin: 0.1rem 0 0;
+  word-break: break-word;
+}
+
+.presenter-tabs {
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: visible;
+}
+
+.presenter-tabs .ui-tabs__list {
+  justify-content: flex-start;
+  min-width: max-content;
 }
 
 .presenter-marquee {
@@ -1688,5 +1717,252 @@ h3 {
 
   .presenter-stage {
     padding: 1rem;
+  }
+
+  .dialog-panel {
+    width: calc(100vw - 1.5rem);
+  }
+}
+
+/* =========================
+   Dialog modal (editorial ReUI)
+   ========================= */
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(46, 40, 31, 0.42);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  animation: dialogFadeIn 160ms ease-out both;
+}
+
+@keyframes dialogFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.dialog-panel {
+  width: min(460px, 96vw);
+  max-height: calc(100vh - 3rem);
+  overflow: auto;
+  background: var(--surface);
+  border: 1px solid var(--border-soft);
+  border-radius: 20px;
+  box-shadow:
+    0 20px 60px rgba(42, 33, 24, 0.22),
+    0 2px 0 rgba(255, 255, 255, 0.7) inset;
+  padding: 2rem 1.75rem 1.5rem;
+  display: grid;
+  gap: 1rem;
+  animation: dialogPopIn 220ms cubic-bezier(0.22, 1.2, 0.36, 1) both;
+}
+
+@keyframes dialogPopIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.dialog-header {
+  text-align: center;
+  display: grid;
+  gap: 0.55rem;
+  justify-items: center;
+}
+
+.dialog-title {
+  font-family: var(--font-heading);
+  font-size: 1.6rem;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  margin: 0;
+  color: var(--text);
+}
+
+.dialog-description {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+.dialog-content {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.dialog-footer {
+  display: flex;
+  gap: 0.7rem;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 0.35rem;
+}
+
+.trophy-emblem {
+  width: 88px;
+  height: 88px;
+  border-radius: 999px;
+  background: radial-gradient(circle at 30% 25%, #fff5c2, #f5d06f 45%, #d89f2d 70%, #8f5f0a 100%);
+  box-shadow:
+    0 10px 28px rgba(216, 159, 45, 0.45),
+    0 0 0 8px rgba(245, 208, 111, 0.22),
+    0 2px 0 rgba(255, 255, 255, 0.8) inset;
+  display: grid;
+  place-items: center;
+  font-size: 44px;
+  line-height: 1;
+  margin-bottom: 0.35rem;
+}
+
+.completion-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+
+.completion-stats__cell {
+  padding: 0.8rem 0.6rem;
+  text-align: center;
+  background: var(--surface-soft);
+  border: 1px solid var(--border-soft);
+  border-radius: 14px;
+}
+
+.completion-stats__eyebrow {
+  font-size: 0.65rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.completion-stats__value {
+  font-family: var(--font-heading);
+  font-size: 1.35rem;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  margin-top: 0.1rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Pulse / Sentiment card — hero stat for overview */
+.pulse-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 1.25rem;
+  align-items: center;
+}
+
+.pulse-card__gauge {
+  width: 128px;
+  height: 128px;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.pulse-card__gauge svg {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.pulse-card__gauge .gauge-track {
+  stroke: var(--border-soft);
+  fill: none;
+  stroke-width: 12;
+}
+
+.pulse-card__gauge .gauge-fill {
+  fill: none;
+  stroke-width: 12;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 700ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.pulse-card__gauge-center {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  pointer-events: none;
+}
+
+.pulse-card__avg {
+  font-family: var(--font-heading);
+  font-size: 2.05rem;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.pulse-card__scale {
+  font-size: 0.75rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+  margin-top: 0.1rem;
+}
+
+.pulse-card__headline {
+  font-family: var(--font-heading);
+  font-size: 1.4rem;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  margin: 0 0 0.3rem 0;
+}
+
+.pulse-card__sub {
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.55;
+  margin: 0 0 0.75rem 0;
+}
+
+.pulse-card__summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.pulse-card__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-soft);
+  background: var(--surface-soft);
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--text-soft);
+}
+
+@media (max-width: 640px) {
+  .pulse-card {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    text-align: center;
+  }
+
+  .pulse-card__summary {
+    justify-content: center;
   }
 }

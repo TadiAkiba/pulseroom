@@ -402,14 +402,93 @@ export function EventDashboardPage() {
       </Tabs>
 
       {activeTab === 'overview' ? (
-        <section className="metric-grid">
-          <MetricCard label="Total responses" value={snapshot.metrics.totalResponses} />
-          <MetricCard label="Questions submitted" value={snapshot.metrics.questionCount} />
-          <MetricCard label="Poll participation" value={`${snapshot.metrics.pollParticipation}%`} />
-          <MetricCard label="Average rating" value={`${snapshot.metrics.averageRating}/5`} />
-          <MetricCard label="Reactions" value={snapshot.metrics.reactionCount} />
-          <MetricCard label="Positive sentiment" value={`${snapshot.analytics.sentiment.positive}%`} accent />
-        </section>
+        <>
+          <section className="metric-grid">
+            <MetricCard label="Total responses" value={snapshot.metrics.totalResponses} />
+            <MetricCard label="Questions submitted" value={snapshot.metrics.questionCount} />
+            <MetricCard label="Poll participation" value={`${snapshot.metrics.pollParticipation}%`} />
+            <MetricCard label="Average rating" value={`${snapshot.metrics.averageRating}/5`} />
+            <MetricCard label="Reactions" value={snapshot.metrics.reactionCount} />
+            <MetricCard label="Positive sentiment" value={`${snapshot.analytics.sentiment.positive}%`} accent />
+          </section>
+
+          {snapshot.ratingResults.length ? (
+            <Card>
+              <CardHeader className="panel-heading">
+                <CardTitle>Pulse check · Sentiment gauge</CardTitle>
+                <CardDescription>
+                  A rolling summary of how the audience is feeling about the session right now.
+                </CardDescription>
+              </CardHeader>
+              <div style={{ padding: '1.25rem 1.5rem 1.5rem' }}>
+                {snapshot.ratingResults.map((rating) => {
+                  const ratio = Math.max(0, Math.min(1, Number.isFinite(rating.average) ? rating.average / rating.scale : 0))
+                  const circumference = 2 * Math.PI * 46
+                  const strokeDashoffset = circumference * (1 - ratio)
+                  const chartPositive = resolvePaletteCssVar('--chart-positive', '#5ed4ad')
+                  const chartNeutral = resolvePaletteCssVar('--chart-neutral', '#c9bfa8')
+                  const chartNegative = resolvePaletteCssVar('--chart-negative', '#e28a8a')
+                  const chartPrimary = resolvePaletteCssVar('--chart-primary', '#cf6227')
+                  const sentimentLabel =
+                    rating.average >= 4.2
+                      ? 'Strongly positive'
+                      : rating.average >= 3.5
+                        ? 'Positive'
+                        : rating.average >= 2.5
+                          ? 'Neutral'
+                          : rating.average >= 1.5
+                            ? 'Cooler room'
+                            : 'Concern flagged'
+                  const pulseColor =
+                    rating.average >= 4.2
+                      ? chartPositive
+                      : rating.average >= 3.5
+                        ? chartPrimary
+                        : rating.average >= 2.5
+                          ? chartNeutral
+                          : chartNegative
+                  return (
+                    <article key={rating.id} className="pulse-card">
+                      <div className="pulse-card__gauge" aria-hidden>
+                        <svg viewBox="0 0 120 120">
+                          <circle className="gauge-track" cx="60" cy="60" r="46" />
+                          <circle
+                            className="gauge-fill"
+                            cx="60"
+                            cy="60"
+                            r="46"
+                            stroke={pulseColor}
+                            strokeDasharray={circumference}
+                            strokeDashoffset={strokeDashoffset}
+                          />
+                        </svg>
+                        <div className="pulse-card__gauge-center">
+                          <div>
+                            <div className="pulse-card__avg">{rating.responses ? rating.average : '—'}</div>
+                            <div className="pulse-card__scale">/ {rating.scale}</div>
+                          </div>
+                        </div>
+                      </div>
+                      <div>
+                        <h3 className="pulse-card__headline">{rating.prompt}</h3>
+                        <p className="pulse-card__sub">
+                          {rating.responses
+                            ? `This pulse reading aggregates ${rating.responses} anonymous attendee ratings in real time.`
+                            : 'No one has voted on this pulse yet — ratings will populate here as the room responds.'}
+                        </p>
+                        <div className="pulse-card__summary">
+                          <span className="pulse-card__badge">{sentimentLabel}</span>
+                          <span className="pulse-card__badge">{rating.responses.toLocaleString()} responses</span>
+                          <span className="pulse-card__badge">1–{rating.scale} scale</span>
+                        </div>
+                      </div>
+                    </article>
+                  )
+                })}
+              </div>
+            </Card>
+          ) : null}
+        </>
       ) : null}
 
       {activeTab === 'analytics' ? (
@@ -599,8 +678,8 @@ export function EventDashboardPage() {
 
             <Card>
               <CardHeader className="panel-heading">
-                <CardTitle>Ratings and reactions</CardTitle>
-                <CardDescription>Quick pulse checks from the audience.</CardDescription>
+                <CardTitle>Pulse check · Sentiment + reactions</CardTitle>
+                <CardDescription>Audience pulse ratings paired with live reaction taps from the session.</CardDescription>
               </CardHeader>
               <div className="stack-list">
                 {snapshot.ratingResults.map((rating) => (

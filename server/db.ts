@@ -718,20 +718,27 @@ export function ensureBaselineInteractions(eventId: string) {
       formKey: 'idea',
       type: 'feedback',
       formTitle: 'AI Idea',
-      prompt: 'Share your idea and the value it could unlock.',
-      extraSettings: { feedEligible: true, points: 4 },
+      prompt:
+        'Share one simple way AI or digital tools could make your job easier or more enjoyable — from small daily tasks to bigger parts of your work.',
+      extraSettings: {
+        feedEligible: true,
+        formDescription:
+          "Examples: turning meeting notes into action items automatically; a simple search for anything in our shared folders; drafting customer emails so you focus only on the parts that matter.",
+        points: 4,
+      },
     },
     {
       formKey: 'opportunity',
       type: 'poll',
       formTitle: 'AI Opportunity',
-      prompt: 'Spot where AI could solve a repeated business problem.',
+      prompt:
+        'If the company invested in one AI or digital upgrade next, which would help you the most in your role?',
       options: [
-        'Customer experience',
-        'Employee experience',
-        'Productivity',
-        'Cost efficiency',
-        'Revenue growth',
+        'Less time on emails, docs, and meeting follow-ups',
+        'Faster answers and search across company knowledge',
+        'Simpler and faster customer experiences',
+        'Less busywork from repetitive tasks and approvals',
+        'Better data and insights without needing to be an expert',
       ],
       extraSettings: { allowMultiple: false, points: 2 },
     },
@@ -739,10 +746,17 @@ export function ensureBaselineInteractions(eventId: string) {
       formKey: 'concern',
       type: 'rating',
       formTitle: 'AI Concern',
-      prompt: 'Capture what feels risky and what would build trust.',
+      prompt:
+        'As we introduce AI and new digital tools, how comfortable do you feel about how this change will be handled?',
       extraSettings: {
         scale: 5,
-        labels: ['Very concerned', 'Concerned', 'Neutral', 'Reassured', 'Very reassured'],
+        labels: [
+          'Worried — I want clearer answers about what changes, and why',
+          'Unsure — I’m open, but I need to understand the details and support',
+          'Neutral — I’m waiting to see how it plays out in practice',
+          'Hopeful — it looks promising, I just want clear guardrails',
+          'Confident — I trust the direction and the support behind it',
+        ],
         points: 2,
       },
     },

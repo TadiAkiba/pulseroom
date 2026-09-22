@@ -748,6 +748,21 @@ export function EventDashboardPage() {
                               {rating.average}/{rating.scale}
                             </span>
                           </div>
+                          {Array.isArray(interaction.settings.labels) && interaction.settings.labels.length > 0 ? (
+                            <ol
+                              style={{
+                                margin: '0.6rem 0 0',
+                                paddingLeft: '1.15rem',
+                                fontSize: '0.86rem',
+                                color: 'var(--muted)',
+                                lineHeight: 1.5,
+                              }}
+                            >
+                              {interaction.settings.labels.map((label, i) => (
+                                <li key={i}>{String(label)}</li>
+                              ))}
+                            </ol>
+                          ) : null}
                         </div>
                       ) : null}
                       {interaction.type === 'reaction' ? (

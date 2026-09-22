@@ -1122,7 +1122,7 @@ h3 {
 .choice-grid {
   display: grid;
   gap: 0.75rem;
-  grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   margin-bottom: 1rem;
 }
 
@@ -1133,6 +1133,11 @@ h3 {
   color: var(--text);
   font-weight: 500;
   box-shadow: none;
+  white-space: normal;
+  text-align: left;
+  line-height: 1.35;
+  padding: 0.85rem 1rem;
+  min-height: 64px;
 }
 
 .choice-pill:hover,
@@ -1531,9 +1536,11 @@ h3 {
   font-weight: 500;
   font-size: 0.95rem;
   letter-spacing: -0.005em;
-  white-space: nowrap;
+  line-height: 1.35;
   overflow: hidden;
-  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
 }
 
 .poll-bar__track {
